@@ -6,23 +6,27 @@
 
 * [Assignment 1](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Assignment_1)
 
-The main focus of Project 1 is MNIST digit classification with KNN and Naive Bayes. These topics are explored by tuning the hyperparameters, applying different normalization techniques, and generating new samples. The models are optimized by testing for accuracy.
+The main focus of Assignment 1 was applying Binary Logistic Regression models to discrete responses data sets. These models are then interpreted using residual diagnostics, confidence intervals, likelihood ratios tests, as well as odds ratios.
 
 * [Assignment 2](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Assignment_2)
 
-The main focus of Project 2 is topic classification. This is achieved by using both CountVectorizer and TFIDF methods to preprocess the text data. Logistic regression models are then trained on the vectorized results in order to determine accuracy. 
+The main focus of Assignment 2 was implementing multinomial regression models on categorical responses data sets. The results are then analyzed through explatory data analysis, confidence intervals, likelihood ratios tests, as well as odds ratios.
 
 * [Assignment 3](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Assignment_3)
 
-The main focus of Project 3 is classification through the means of dimensionality reduction. The main methods used in this example are Principle Component Analysis (PCA) and Gaussian Mixture Models (GMM). K-Means models are then trained on the reduced results in order to optimize the hyperparameters and determine accuracy.
+The main focus of Assignment 3 was to apply different time series analysis techniques. These methods include linear modeling, ARIMA modeling, model averageing, and vector autoregression. The results are then validated using cross-validation as well as accuracy metrics. Then, each model is able to predict forcasts for the series.
 
 * [Lab 1](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Lab_1)
 
-The main focus of the Final Project was to improve the Amazon Fine Foods marketplace experience by helping both consumers and retailers glean better insights on the items they buy or sell. It was a group project in which we intended to leverage machine learning algorithms in order to provide services that would benefit both ends of the marketplace. My main personal contribution was the recommender system.
+The main focus of Lab 1 was to conduct discrete analysis on the failed Challenger Space Shuttle disaster. The analysis included exploratory data analysis, data augmentation, logistic regression, model comparisons, and likelihood ratio tests. 
 
 * [Lab 2](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Lab_2)
 
+The main focus of Lab 2 was to perform a time series analysis of the global carbon dioxide levels over time. This investigation applied series decomposition, ACF/PACF interpretation, linear modeling, ARIMA modeling, as well as predictive forecasting. 
+
 * [Lab 3](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Lab_3)
+
+The main focus of Lab 3 was to analyze the rate of U.S. driving fatalities and its contributing factors. The methods used to perform the analysis were pooled OLS, fixed effects, and random effects modeling. 
 
 *All of these projects were completed for UCB's Master of Data Science Course W271 - Statistical Methods for Discrete Response, Time Series, and Panel Data. These were completed using RStudio.* 
 

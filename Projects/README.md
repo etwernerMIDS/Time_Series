@@ -24,5 +24,5 @@ The main focus of the Final Project was to improve the Amazon Fine Foods marketp
 
 * [Lab 3](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Lab_3)
 
-*All of these projects were completed for UCB's Master of Data Science Course W207 - Applied Machine Learning. These were completed using Python Jupyter Notebooks.* 
+*All of these projects were completed for UCB's Master of Data Science Course W271 - Statistical Methods for Discrete Response, Time Series, and Panel Data. These were completed using RStudio.* 
 

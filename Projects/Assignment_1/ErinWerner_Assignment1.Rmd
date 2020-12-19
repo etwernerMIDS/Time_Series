@@ -1,0 +1,949 @@
+---
+title: "W271 Assignment 1"
+author: "Erin Werner"
+date: "October 4th, 2020"
+header-includes:
+  - \usepackage{subfig}
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 3
+    number_sections: true
+  html_document:
+    df_print: paged
+geometry: margin=1in
+---
+\newpage
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(car)
+library(readr)
+library(expss)
+library(nnet)
+library(mcprofile)
+library(gridExtra)
+library(grid)
+```
+
+# Confidence Intervals
+
+A Wald confidence interval for a binary response probability does not always have the stated confidence level, $1-\alpha$, where $\alpha$ (the probability of rejecting the null hypothesis when it is true) is often set to $0.05$. 
+
+## Question 1.1
+
+**Redo the Wald Confidence Interval exercise for `n=50, n=100, n=500`, plot the graphs, and describe what you have observed from the results.** 
+
+I can construct a true Wald confidence level by running simulations and calculating the interval using the Wald Confidence Interval's formula.
+
+$$ 
+\hat{\pi} \pm Z_{1-\frac{\alpha}{2}} \sqrt{\frac{\hat{\pi}(1-\hat{\pi})}{n}} 
+$$
+To start, I can initialize some functions and variables.
+```{r}
+wald.CI.true.coverage = function(pi, alpha=0.05, n){
+  w = 0:n
+  pi.hat = w/n
+  pmf = dbinom(x=w, size=n, prob=pi)
+  var.wald = pi.hat*(1-pi.hat)/n
+  wald.CI_lower.b = pi.hat - qnorm(p = 1-alpha/2)*sqrt(var.wald)
+  wald.CI_upper.b = pi.hat + qnorm(p = 1-alpha/2)*sqrt(var.wald)
+  covered.pi = ifelse(test = pi>wald.CI_lower.b, yes = ifelse(test = 
+                                          pi<wald.CI_upper.b,yes=1, no=0), no=0)
+  wald.CI.true.coverage = sum(covered.pi*pmf)
+  wald.df=data.frame(w, pi.hat,round(data.frame(pmf,wald.CI_lower.b,
+                                    wald.CI_upper.b),4),covered.pi)
+  return(wald.df)
+}
+```
+
+```{r}
+wald_dataframe = function(n){
+  pi.seq = seq(0.01,0.99, by=0.01)
+  wald.CI.true.matrix = matrix(data=NA,nrow=length(pi.seq),ncol=2)
+  counter=1
+  for (pi in pi.seq) {
+      wald.df2 = wald.CI.true.coverage(pi=pi, alpha=my_alpha, n=n)
+      wald.CI.true.matrix[counter,] = c(pi,sum(wald.df2$covered.pi*wald.df2$pmf))
+      counter = counter+1
+  }
+  return(data.frame(wald.CI.true.matrix))
+}
+```
+
+```{r}
+my_alpha <- 0.05
+my_n10 <- 10
+my_n50 <- 50
+my_n100 <- 100
+my_n500 <- 500
+```
+
+First, I can compute the true coverage for $\pi$ = 0.6.
+
+```{r}
+wald.df = wald.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n50)
+wald.CI.t.cov.lev = sum(wald.df$covered.pi*wald.df$pmf)
+print(paste0("For n = ",my_n50,", True Confidence Level = ",wald.CI.t.cov.lev,"."))
+```
+
+```{r}
+wald.df = wald.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n100)
+wald.CI.t.cov.lev = sum(wald.df$covered.pi*wald.df$pmf)
+print(paste0("For n = ",my_n100,", True Confidence Level = ",wald.CI.t.cov.lev,"."))
+```
+
+```{r}
+wald.df = wald.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n500)
+wald.CI.t.cov.lev = sum(wald.df$covered.pi*wald.df$pmf)
+print(paste0("For n = ",my_n500,", True Confidence Level = ",wald.CI.t.cov.lev,"."))
+```
+
+Based on the Wald true confidence level values, one can see that the true confidence level is slightly less than the theoretical 0.95 level that is expected, given different values of n. Additionally, one can see that increasing n does indeed improve the confidence value, as the confidence value incrementally approaches the theoretical level for greater values of n. As a result, for high values of n (such as n = 500), the Wald true confidence level is actually a true 95% confidence level.
+
+Next, I can get a more general understanding of the Wald true confidence level by computing the true coverage given a sequence of $\pi$ in [0,1] and then plotting the true Wald coverage level (for given `n` and $\alpha$).
+
+```{r fig.width=8.5, fig.height=3.8, fig.align='center'}
+my_wald <- wald_dataframe(my_n50)
+plot50 <- ggplot(my_wald, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wald True Cov. for n = ",my_n50),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+my_wald <- wald_dataframe(my_n100)
+plot100 <- ggplot(my_wald, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wald True Cov. for n = ",my_n100),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+my_wald <- wald_dataframe(my_n500)
+plot500 <- ggplot(my_wald, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wald True Cov. for n = ",my_n500),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+egg::ggarrange(plot50, plot100, plot500, nrow = 1)
+```
+
+I can observe that the Wald interval with n = 50 tends to be somewhat far from the theoretical confidence level of 0.95, with values generally oscillating between 0.80 and 0.95. For values of $\pi$ close to 0 or 1, the interval can be very liberal.
+
+Then, I can observe that the Wald interval with n = 100 tends to be somewhat closer to the theoretical confidence level of 0.95 compared to n = 50, with values generally oscillating between 0.85 and 0.95. For values of $\pi$ close to 0 or 1, the interval is still somewhat liberal.
+
+Last, I can observe that the Wald interval with n = 500 tends to be very close to the theoretical confidence level of 0.95, with values mostly around 0.95, but more generally between 0.90 and 0.95. For values of $\pi$ close to 0 or 1, the interval is more conservative.
+
+Overall, I notice that as I increase the value of n, the true confidence level more closely represents the theoretical confidence level, with less interval oscillation and increasingly more conservative end intervals.
+
+
+
+## Question 1.2
+
+**Modify the code for the Wilson Interval and redo the confidence interval exercise for `n=10, n=50, n=100, n=500`, plot the graphs, describe what you have observed from the results, and compare the Wald and Wilson intervals based on your results. **
+
+I can now construct a true Wilson confidence level by running simulations and calculating the interval using the Wilson's Confidence Interval's formula.
+
+$$ 
+\tilde{\pi} \pm \frac{Z_{1-\frac{\alpha}{2}} n^{1/2}}{n + Z^2_{1-\frac{\alpha}{2}}} \sqrt{\hat{\pi}(1-\hat{\pi}) + \frac{Z^2_{1-\frac{\alpha}{2}}}{4n}}
+$$
+
+To start, I can initialize some new Wilson functions.
+```{r}
+wilson.CI.true.coverage = function(pi, alpha=0.05, n){
+  w = 0:n
+  pi.hat = w/n
+  pmf = dbinom(x=w, size=n, prob=pi)
+  my_Z = qnorm(p = 1-alpha/2) 
+  var.wilson1 = pi.hat*(1-pi.hat)
+  var.wilson2 = ((my_Z)^2)/(4*n)
+  var.wilson = var.wilson1 + var.wilson2  
+  Z_num = my_Z*sqrt(n)
+  Z_den = n + (my_Z)^2
+  Z_frac = Z_num/Z_den
+  wil.CI_lower.b = pi.hat - Z_frac*sqrt(var.wilson)
+  wil.CI_upper.b = pi.hat + Z_frac*sqrt(var.wilson)
+  covered.pi = ifelse(test = pi > wil.CI_lower.b,yes = ifelse(test = 
+                                        pi<wil.CI_upper.b,yes=1, no=0), no=0)
+  wil.CI.true.coverage = sum(covered.pi*pmf)
+  wilson.df=data.frame(w, pi.hat,round(data.frame(pmf,
+                                  wil.CI_lower.b,wil.CI_upper.b),4),covered.pi)
+  return(wilson.df)
+}
+```
+
+```{r}
+wilson_dataframe = function(n){
+  pi.seq = seq(0.01,0.99, by=0.01)
+  wil.CI.true.matrix = matrix(data=NA,nrow=length(pi.seq),ncol=2)
+  counter=1
+  for (pi in pi.seq) {
+      wil.df2 = wilson.CI.true.coverage(pi=pi, alpha=my_alpha, n=n)
+      wil.CI.true.matrix[counter,] = c(pi,sum(wil.df2$covered.pi*wil.df2$pmf))
+      counter = counter+1
+  }
+  return(data.frame(wil.CI.true.matrix))
+}
+```
+
+
+Once again, I can first compute the true coverage for $\pi$ = 0.6.
+```{r}
+wilson.df = wilson.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n10)
+wil.CI.t.cov.lev = sum(wilson.df$covered.pi*wilson.df$pmf)
+print(paste0("For n = ",my_n10,", True Confidence Level = ",wil.CI.t.cov.lev,"."))
+```
+
+```{r}
+wilson.df = wilson.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n50)
+wil.CI.t.cov.lev = sum(wilson.df$covered.pi*wilson.df$pmf)
+print(paste0("For n = ",my_n50,", True Confidence Level = ",wil.CI.t.cov.lev,"."))
+```
+
+```{r}
+wilson.df = wilson.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n100)
+wil.CI.t.cov.lev = sum(wilson.df$covered.pi*wilson.df$pmf)
+print(paste0("For n = ",my_n100,", True Confidence Level = ",wil.CI.t.cov.lev,"."))
+```
+
+```{r}
+wilson.df = wilson.CI.true.coverage(pi=0.6, alpha=0.05, n=my_n500)
+wil.CI.t.cov.lev = sum(wilson.df$covered.pi*wilson.df$pmf)
+print(paste0("For n = ",my_n500,", True Confidence Level = ",wil.CI.t.cov.lev,"."))
+```
+
+Based on the Wilson true confidence level values for $\pi$ = 0.6, one can see that the true confidence level is slightly less than the theoretical 0.95 level for different values of n. Yet, one can also see that increasing n doesn't always necessarily improve the given confidence value for every value of $\pi$. This varies from the observed Wald true coverage values, as n = 100 results in a slightly lower Wilson true confidence level than that of n = 50. Furthermore, the overall true confidences for values of n greater than 50 are slightly lower than the Wald true coverage values for $\pi$ = 0.6. However, these results only represent a single instance of $\pi$ and there is still a general trend that does approach the theoretical value of a 95% confidence level.
+
+To get a more comprehensive understanding of the overall Wilson true confidence level, I can compute the true coverage given a sequence of $\pi$ in [0,1] and then plot the true Wilson coverage level (for given `n` and $\alpha$).
+```{r fig.width=6.5, fig.height=4.5, fig.align='center'}
+my_wilson  <- wilson_dataframe(my_n10)
+wil10 <- ggplot(my_wilson, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wilson True Coverage for n = ",my_n10),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+my_wilson  <- wilson_dataframe(my_n50)
+wil50 <- ggplot(my_wilson, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wilson True Coverage for n = ",my_n50),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+my_wilson  <- wilson_dataframe(my_n100)
+wil100 <- ggplot(my_wilson, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wilson True Coverage for n = ",my_n100),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+my_wilson  <- wilson_dataframe(my_n500)
+wil500 <- ggplot(my_wilson, aes(X1, X2)) + geom_line() + xlim(0,1) + 
+  scale_y_continuous(breaks=c(0,0.2, 0.4, 0.6, 0.8,1), limits = c(0,1)) +
+  labs(title=paste0("Wilson True Coverage for n = ",my_n500),
+       y="True Confidence Level",x=expression(pi)) + 
+  geom_hline(yintercept=1-my_alpha, linetype="dotted")
+
+egg::ggarrange(wil10, wil50, wil100, wil500, nrow = 2)
+```
+
+First, I can observe that the Wilson interval with n = 10 tends to be somewhat far from the theoretical confidence level of 0.95, with values generally oscillating between 0.75 and 1.00. For values of $\pi$ close to 0 or 1, the interval can be conservative, with intervals above the 0.95 confidence level. Overall, the Wilson confidence interval performs much better compared to the Wald confidence interval for n = 10, as it has a slightly smaller range of true confidence values and more conservative end intervals.
+
+Next, I can then observe that the Wilson interval with n = 50 tends to be somewhat close to the theoretical confidence level of 0.95, with values generally oscillating between 0.85 and 0.95. For values of $\pi$ close to 0 or 1, the interval can be very conservative, with intervals above the 0.95 confidence level. Overall, the Wilson confidence interval performs much better compared to the Wald confidence interval for n = 50, as it has a smaller range of true confidence values and more conservative end intervals.
+
+Then, I can observe that the Wilson interval with n = 100 tends to be even closer to the theoretical confidence level of 0.95, with values generally between 0.90 and 0.95. For values of $\pi$ close to 0 or 1, the interval can be very conservative, with intervals around the 0.95 confidence level. Overall, the Wilson confidence interval still performs much better compared to the Wald confidence interval for n = 100, as it has an even smaller range of true confidence values and conservative end intervals.
+
+Last, I can observe that the Wilson interval with n = 500 tends to be very close to the theoretical confidence level of 0.95, with values mostly around 0.95 but generally between 0.92 and 0.95. For values of $\pi$ close to 0 or 1, the interval is very conservative, with intervals around the 0.95 confidence level. Overall, the Wilson confidence interval still performs slightly better compared to the Wald confidence interval for n = 500, as it has a slightly smaller range of true confidence values and, the main difference being, more conservative end intervals.
+
+As a result, I notice that as I increase the value of n for both Wald and Wilson confidence intervals, the true confidence level more closely represents the theoretical confidence level, with less interval oscillation and increasingly more conservative end intervals. However, I can see that the Wilson confidence interval generally does a much better job than the Wald interval.
+
+
+
+\newpage
+
+
+# Binary Logistic Regression
+
+**From the `placekick.csv` data set, use the Distance, Weather, Wind15, Temperature, Grass, Pressure, and Ice explanatory variables as linear terms in a new logistic regression model and complete the following questions.**
+
+```{r}
+placekick_BW<-read_csv(paste0(here::here(),"/assignments/assignment_1/placekick.BW.csv"))
+```
+
+```{r}
+head(placekick_BW)
+```
+
+
+## Question 8.a
+
+**Estimate the model and properly define the indicator variables used within it.**
+
+First, I need to transform the binary dependent variable, which consists of "Y" and "N" values, into zeros and ones for the model. So, for the variable `Good`, "Y" will convert to 1, indicating that the kick was good, and "N" will convert to 0, indicating that the kick was bad.
+
+```{r}
+placekick_BW$Result <- ifelse(placekick_BW$Good == "Y", 1, 0)
+```
+
+Then, to estimate the model, I can run the regression $logit(\pi) = \beta_0+\beta_1Distance+\beta_2Weather+\beta_3Wind15+\beta_4Temperature+\beta_5Grass+\beta_6Pressure+\beta_7Ice$ as follows.
+
+```{r warning=FALSE}
+mod.plk <- glm(formula=Result~Distance+Weather+Wind15+Temperature+Grass+Pressure+Ice, 
+               family = binomial(link = logit), data = placekick_BW)
+```
+
+```{r}
+summary(mod.plk)
+```
+
+As a result, $logit(\pi)$ = 5.7402 - 0.1096`Distance` - 0.0830`WeatherInside` - 0.4442`WeatherSnowRain` - 0.2476`WeatherSun` - 0.2438`Wind15` + 0.2500`TemperatureHot`+ 0.2349`TemperatureNice` - 0.3284`Grass` + 0.2702`PressureY` - 0.8761`Ice`.
+
+In general, indicator variables represent the various categorical binary 'dummy' variables. This means that for each categorical variable in the data set, all but one default category will get its own binary column to indicate the absence or presence of that categorical effect. The value of the indicator variables are equal to 1 when their corresponding condition is true and 0 otherwise. For example, in this context, `TemperatureHot` = 1 for field goals attempted at a hot temperature and 0 for non-hot temperatures. For this model, the indicator variables are `WeatherInside`, `WeatherSnowRain`, `WeatherSun`, `TemperatureHot`, `TemperatureNice`, and `PressureY`.
+
+## Question 8.b
+
+**The authors use `Sun` as the base level category for Weather, which is not the default level that R uses. Describe how `Sun` can be specified as the base level in R. Also, re-estimate the model in part (a) using `Sun` as the base level category for `Weather`.**
+
+In order to set the default level for a categorical indicator variable, in R, one can use the `relevel()` or `factor()` functions to change the base level. So in this context, one can use `factor()` to change the 'default' category for `Weather` to the sunny condition as follows.
+
+```{r}
+placekick_BW$Weather_Sun <- factor(placekick_BW$Weather, 
+                                   levels = c("Sun","Clouds","SnowRain","Inside"))
+```
+
+Now, I can re-estimate the model from Part (a) with `Sun` as the base level for `Weather` by using the newly factored feature, named `Weather_Sun`, instead of `Weather`. Then, the new regression is $logit(\pi) = \beta_0+\beta_1Distance+\beta_2Weather\_Sun+\beta_3Wind15+\beta_4Temperature+\beta_5Grass+\beta_6Pressure+\beta_7Ice$.
+
+```{r warning=FALSE}
+mod.plk.2<-glm(formula=Result~Distance+Weather_Sun+Wind15+Temperature+Grass+Pressure+Ice, 
+               family = binomial(link = logit), data = placekick_BW)
+```
+
+```{r}
+summary(mod.plk.2)
+```
+
+As a result, the updated regression is $logit(\pi)$ = 5.4926 - 0.1096`Distance` + 0.2476`Weather_SunClouds` - 0.1299`Weather_SunSnowRain` + 0.1646`Weather_SunInside` - 0.2438`Wind15` + 0.2500`TemperatureHot`+ 0.2349`TemperatureNice` - 0.3284`Grass` + 0.2702`PressureY` - 0.8761`Ice`.
+
+
+## Question 8.c
+
+**Perform LRTs for all explanatory variables to evaluate their importance within the model. Discuss the results.**
+
+```{r warning=FALSE}
+Anova(mod = mod.plk, test = "LR")
+```
+
+In this LRT, each hypothesis test is conditional on the inclusion of all the other variables in the model. Overall, most of the explanatory variables do not have statistically significant p-values for $\alpha$ = 0.05. However, there are two variables that do, `Grass` and `Distance`. The p-value corresponding to `Distance` is  2e-16, which is very small and significant. This means that the variable is very important in this model. Furthermore, the p-values corresponding to `Grass` and `Ice` are both somewhat small (less than 0.06). This means that there is some evidence of their statistical importance in the model. Yet, the other p-values are all greater than 0.10, where `Pressure` and `Temperature` are much larger, as they are greater than 0.25. As a result, for these four variables, there is not sufficient evidence that they affect the probability of success for a field goal. 
+
+
+## Question 8.d
+
+**Estimate an appropriate odds ratio for distance, and compute the corresponding confidence interval. Interpret the odds ratio.**
+
+The odds ratio for a change in distance by $c$ units is expressed in the following formula:
+$$
+OR = exp(c \beta_1)
+$$
+which depends on the distance coefficient.
+
+```{r}
+beta1 <- mod.plk$coefficients['Distance']
+```
+
+An important thing to consider in order to yield valuable information is the value of c. In this context, a one yard difference is not as significant compared to a 10 yard difference. So, I will set c to -10, representing a 10 yard decrease in distance. This will allow me to calculate an appropriate odds ratio for distance.
+
+```{r}
+c10 <- -10
+OR <- exp(beta1*c10)
+print(paste0("For c = ",c10,", the Odds Ratio = ", round(OR,3)))
+```
+
+As a result, for a 10 yard decrease in distance, the estimated odds ratio is 2.99.
+
+Next, I can compute the corresponding confidence interval
+
+```{r message=FALSE}
+beta.ci <- confint(object = mod.plk, parm = "Distance", level = 0.95) 
+```
+
+```{r}
+bci10de <- as.numeric(rev(exp(c10*beta.ci))) 
+print(paste0("For c = ",c10,", the CI is (", 
+             round(bci10de[1],3), ", ", round(bci10de[2],3), ")"))
+```
+
+So, given a 10 yard decrease, the corresponding 95% interval is (2.61, 3.45). Thus, with 95% confidence, the odds of a success change by an amount between 2.61 and 3.45 times for every 10 yard decrease in distance, holding all other variables in the model constant.
+
+
+
+\newpage
+
+# Binary Logistic Regression 
+
+**Suppose you are hired by the University's Admission Committee and are charged to analyze this data to quantify the effect of GRE, GPA, and college rank on admission probability.**
+
+The data set `admissions.csv` contains a small sample of graduate school admission data from a university.
+```{r}
+admissions <- read_csv(paste0(here::here(),"/assignments/assignment_1/admissions.csv"))
+```
+
+```{r}
+head(admissions)
+```
+
+## Question 3.1
+
+**Examine the data and conduct EDA.**
+
+I first need to get an overall idea of the data I am working with.
+
+```{r}
+summary(admissions[2:5])
+```
+
+```{r}
+paste("Sample Size: ", nrow(admissions))
+```
+
+From the printout of the Admissions data set, I see:
+
+* It is a somewhat small data set with 400 observations and 4 columns. There does not appear to be any missing or erroneous data points.
+
+* Column `admit` takes on two integer values, which indicate whether or not the individual was admitted. Zero indicates that the individual was not admitted and one indicates that the individual was admitted. This variable should be considered as the binomial outcome and will act as the dependent variable of the exercise. Based on the mean of the column (0.3), one can tell that there are a greater amount of non-admitted individuals in the data set.
+
+* Column `gre` is a numeric column, which typically consists of values between 200 and 800 with a mean of about 580 and a max of 800. This represents the individuals GRE Test Score. This will be one of the main features that I will use to build the model.
+
+* Column `gpa` is a numeric column, which typically consists of values between 2 and 4 with a mean of about 3.4. This represents the individuals college GPA, with a maximum potential value of 4.0. This will be another one of the main features that I will use to build the model. 
+
+* Column `rank` is a numeric column yet it only takes on 4 values, thus one could also consider modeling with it being a categorical feature. Those four values are 1, 2, 3, and 4. In this context, 1 is considered to be the highest rank and 4 is the lowest on this scale. This represents the individual's rank in their college major. This column will act as an additional feature that I will consider in the model.
+
+I will now conduct an exploratory data analysis through graphs and tables to gain a more in depth understanding of the data that I am working with in order to build the model. I added additional columns for visualization purposes.
+```{r}
+admissions$admit_str <- ifelse(admissions$admit == 0, "Not Admitted", "Admitted")
+```
+
+To further understand the data, I made following tables and visualizations.
+```{r}
+temp <- as.data.frame(cro(admissions$rank, admissions$admit))
+colnames(temp) <- c("", "Not Admitted", "Admitted")
+rownames(temp) <- c("Rank 1", "Rank 2", "Rank 3", "Rank 4", "Total")
+temp$Total = coalesce(temp$`Not Admitted`, 0) + coalesce(temp$`Admitted`,0)
+temp[2:4]
+```
+
+This table shows the number of total admitted and non-admitted individuals for each college major rank. One can see that there are a majority of non-admitted individuals as well as a higher quantity of applicants with ranks of 2 and 3. An important observation is that admissions and non-admissions both occur at all rank levels. However, more individuals with Rank 1 and 2 are admitted than those of Rank 3 and 4.
+
+Now that I have a general idea of what the data looks like, I can take a more detailed look into the individual distributions of the four key variables. 
+
+```{r fig.width=6.5, fig.height=3.8, fig.align='center',warning=FALSE,message=FALSE}
+p <- ggplot(admissions, aes(admit)) + 
+  geom_histogram(binwidth = 1, fill = "mediumturquoise",col="white",size = 0.5)+  
+  labs(title="Histogram of Admission Results", x = "Admission",y = "Frequency")
+p1 <- ggplot(admissions, aes(gre)) + 
+  geom_histogram(binwidth = 50, fill = "mediumturquoise",col="white",size = 0.5)+  
+  labs(title="Histogram of GRE Scores", x = "Score",y = "Frequency")
+p2 <- ggplot(admissions, aes(gpa)) + 
+  geom_histogram(binwidth = 0.2, fill = "mediumturquoise",col="white",size = 0.5)+  
+  labs(title="Histogram of College GPA", x = "GPA",y = "Frequency")
+p3 <- ggplot(admissions, aes(rank)) + 
+  geom_histogram(binwidth = 1, fill = "mediumturquoise",col="white",size = 0.5)+  
+  labs(title="Histogram of Major Ranks", x = "Rank",y = "Frequency")
+egg::ggarrange(p, p1, p2, p3, nrow = 2)
+```
+
+In the histograms above I see:
+
+* Feature `admit` is a binary variable with a greater amount of zeros compared to ones. This confirms that more individuals in the data set are not admitted than admitted.
+
+* Feature `gre` follows a mostly uni-modal, normal distribution with a slight negative skew towards higher GRE scores. The distribution peaks around the mean value of 587. There appears to be some outlying values towards the lower end of the score range, but there does not appear to be any fat tails. Yet, since I know that the sample size is 400, which is greater than 30, I can  rely on asymptotic assumptions of normality for the data. This will be important for the model assumptions moving forward. 
+
+* Feature `gpa` appears to have a somewhat similar distribution to `gre`, possibly indicating that these variables could have a relationship in the model. The histogram appears to follow a uni-modal, normal distribution with a slight negative skew towards higher GPAs. The distribution peaks around the mean of 3.4. There does not appear to be any outliers or fat tails. Yet, I can also rely on asymptotic assumptions of normality.  
+
+* Feature `rank` can be considered as a categorical variable in this context, so the histogram serves to display the frequency of each category. One can see that the ranks are not uniformly distributed as most individuals fall in the second and third rank, creating an almost normal distribution. This will be important to consider for building the model.
+
+Yet, these histograms only reveal the distribution of values, without any indication of how successful the individuals were in getting admitted. So, I can generate additional plots to help provide this insight.
+
+
+```{r fig.width=7.5, fig.height=3.8, fig.align='center'}
+b1 <- ggplot(admissions, aes(admit_str, gre)) + theme(legend.position="none") + 
+    geom_boxplot(varwidth=T, aes(fill = factor(admit))) + 
+    scale_fill_manual("", values = c("lightcoral", "lightgreen")) +
+    labs(title="GRE Score per Adm.",x="Admission",y="GRE Score")
+b2 <- ggplot(admissions, aes(admit_str, gpa)) + theme(legend.position="none") + 
+    geom_boxplot(varwidth=T, aes(fill = factor(admit))) + 
+    scale_fill_manual("", values = c("lightcoral", "lightgreen")) +
+    labs(title="College GPA per Adm.",x="Admission",y="GPA")
+b3 <- ggplot(admissions, aes(x=rank,group=admit,fill=factor(admit))) + 
+  theme(legend.position="bottom") +
+  scale_fill_manual("", values = c("lightcoral", "lightgreen"),
+                      labels=c("Not Admitted", "Admitted")) +
+  geom_histogram(binwidth=0.5, position="dodge",col="white",size = 0.5)+  
+  labs(title="Major Ranks per Adm.", x = "Rank",y = "Frequency")
+egg::ggarrange(b1, b2, b3, nrow = 1)
+```
+
+In the plots above I see:
+
+* Feature `gre` has slightly different distributions for individuals that were admitted compared to not admitted. Individuals that were admitted tend to have higher scores, in general, than those who were not admitted. Both groups have outliers with lower scores. However, the two distributions overlap a fair amount and non-admitted individuals have a greater density of points than admitted.
+
+* Feature `gpa`, again, appears to have a similar distribution to `gre`. The individual distributions for admitted and non-admitted are similar, but admitted individuals, on average, tend to have higher GPAs. The non-admitted group does have an outlier with a low score. Yet, these distributions do overlap and non-admitted individuals have a greater density of data points.
+
+* Feature `rank` compares the quantity of admitted versus non-admitted individuals side-by-side with regards to college rank. The Rank 1 grouping is the only group in which the number of admitted individuals exceeds the number of non-admitted individuals. In the remaining ranks, the number of non-admitted individuals nearly doubles or triples the number of admitted individuals. This makes sense in this context, as Rank 1 is the highest rank, indicating a good potential admission.  
+
+Another way to look at a potential relationship between two features, more specifically between `gre` and `gpa`, is to focus on the scatter plot.
+
+```{r warning=FALSE, message=FALSE, fig.width=5, fig.height=3.2, fig.align='center'}
+ggplot(admissions, aes(x=gre, y=gpa)) +
+  geom_point(fill="gray", size = 2.5, aes(col=factor(admit))) + 
+  geom_smooth(method="loess", se=F) + theme(legend.position="bottom") + 
+  scale_colour_manual("Results",values=c("lightcoral","lightgreen"),
+                      labels=c("Not Admitted", "Admitted")) +
+  labs(title="GRE Score vs College GPA",y="College GPA",x="GRE Score")
+```
+
+Above, the scatter plot displays the GRE score vs. the college GPA as well as the predicted linear regression line, grouped by admission status. There appears to be a linear, positive relationship between the two different scores. This means that as an individuals GRE score increases, the GPA score is also likely to increase. However, there is no clear distinction between individuals that are admitted or not-admitted in regards to `gre` vs `gpa`. 
+
+
+## Question 3.2
+
+**Estimate a binary logistic regression using the following set of explanatory variables: $gre$, $gpa$, $rank$, $gre^2$, $gpa^2$, and $gre \times gpa$.**
+
+First, I need to treat `rank` as a categorical variable.
+```{r}
+admissions$rank <- factor(admissions$rank)
+```
+
+Then, I can run the logistic regression model  $logit(\pi)=\beta_0+\beta_1gre+\beta_2gpa+\beta_3rank+\beta_4gre^2+\beta_5gpa^2+\beta_6gre*gpa$.
+```{r message=FALSE, warning=FALSE}
+mod.fit.admit <- glm(formula = admit ~ gre + gpa + rank + I(gre^2) + I(gpa^2) + gre:gpa,
+                     family = binomial(link = logit),data = admissions)
+```
+
+```{r}
+summary(mod.fit.admit)
+```
+
+As a result, $logit(\pi)$ = -7.325e+00 + 1.860e-02`gre` - 1.777e-01`gpa` - 7.130e-01`rank2` - 1.341e+00`rank3` - 1.595e+00`rank4` + 3.070e-06`I(gre^2)` + 6.699e-01`I(gpa^2)` - 5.888e-03`gre:gpa`.
+
+
+
+## Question 3.3 
+
+**Test the hypothesis that GRE has no effect on admission using the likelihood ratio test.**
+
+I can use the `Anova()` function from `car` package for the LRT. This function performs a Type II Error test, which is the non-rejection of a false null hypothesis. 
+
+All of the rows are based on the model $logit(\pi)=\beta_0+\beta_1gre+\beta_2gpa+\beta_3rank+\beta_4gre^2+\beta_5gpa^2+\beta_6gre*gpa$, where each row gives a test of $H_0:\beta_i=0$ vs. $H_1:\beta_i\neq0$ for the respective variables.
+
+```{r warning=FALSE}
+Anova(mod = mod.fit.admit, test = "LR")
+```
+
+The LRT test points to the results that `rank` is the only variable that has a significant p-value for $\alpha$ = 0.05. This indicates that while college rank is important in explaining the admission status, the remaining variables are not. As a result, with regards to the GRE, I do not reject the null hypothesis. Therefore, I can assume that the GRE has no effect on admission.
+
+
+## Question 3.4 
+
+**What is the estimated effect of college GPA on admission?**
+
+The odds ratio for an increase in GPA by $c$ units is expressed in the following formula:
+$$
+OR = exp(c \beta_2 + c \beta_4(2 \times gpa  + c) + c \beta_{6} gre )
+$$
+which depends on both the GPA and the GRE score.
+
+```{r}
+c <- 0.1 #an appropriate c-unit change for GPA
+my_gre <- 720
+my_gpa <- 3.3
+gpa_OR <- c * exp(mod.fit.admit$coefficients['gpa'] + 
+                mod.fit.admit$coefficients['I(gpa^2)']*(2*my_gpa + c) +
+                mod.fit.admit$coefficients['gre:gpa']*my_gre)
+gpa_OR <- round(gpa_OR,4)
+print(paste0("Estimated effect of college GPA = ", gpa_OR, " for c = ", c,
+             ", GRE = ", my_gre, ", and GPA = ", my_gpa,"."))
+```
+
+The odds of success change by $e^{c(\beta_2 + \beta_4*(2*gpa + c) + \beta_g*gre)}$ = 0.1074 times for a 0.1 unit increase in GPA when GPA is at a value of 3.3 with a GRE score of 720.
+
+I can also make a table for different GRE and GPA values to see how the estimated effect of GPA changes, given a constant `c = 0.1` unit increase in GPA.
+```{r}
+gre_scores <- c(200,300,400,500,550,600,650,700,800)
+gpa_values <- c(1.0,2.0,2.5,2.8,3.0,3.3,3.5,3.8,4.0)
+gpa_effect <- c()
+for(the_gre in gre_scores){
+  my_row <- c()
+  for(the_gpa in gpa_values){
+    gpa_OR_temp <- c * exp(mod.fit.admit$coefficients['gpa'] + 
+                             mod.fit.admit$coefficients['I(gpa^2)']*(2*the_gpa + c) +
+                             mod.fit.admit$coefficients['gre:gpa']*the_gre)
+    gpa_OR_temp <- round(gpa_OR_temp,3)
+    my_row <- c(my_row,gpa_OR_temp)
+  }
+  gpa_effect <- rbind(gpa_effect,my_row)
+}
+gpa_impact <- data.frame(gpa_effect)
+colnames(gpa_impact) <- c("GPA 1.0","GPA 2.0","GPA 2.5","GPA 2.8","GPA 3.0",
+                          "GPA 3.3","GPA 3.5","GPA 3.8","GPA 4.0")
+rownames(gpa_impact) <- c("GRE 200","GRE 300","GRE 400","GRE 500","GRE 550",
+                          "GRE 600","GRE 650","GRE 700","GRE 800")
+gpa_impact
+```
+
+Now, the odds of success change by $e^{c(\beta_2 + \beta_4*(2*gpa + c) + \beta_g*gre)}$ times for a 0.1 unit increase in GPA when GPA and GRE are set according to the rows and columns in the table. For example, the odds of success change by 0.785 times for a 0.1 unit increase in GPA when GPA is at a value of 2.5 with a GRE score of 200. Overall, I can see that a lower GRE score and a higher GPA value result in a high estimated effect for a 0.1 unit increase in GPA.
+
+## Question 3.5
+
+**Construct the confidence interval for the admission probability for the students with $GPA = 3.3$, $GRE = 720$, and $rank=1$.**
+
+To start, I can initialize a general confidence interval calculation function.
+```{r}
+ci.pi <- function(newdata, mod.fit.obj, alpha){
+  linear.pred<-predict(object=mod.fit.obj,newdata=newdata,type="link",se=TRUE) 
+  CI.lin.pred.lower <- linear.pred$fit - qnorm(p = 1-alpha/2)*linear.pred$se
+  CI.lin.pred.upper <- linear.pred$fit + qnorm(p = 1-alpha/2)*linear.pred$se
+  CI.pi.lower <- exp(CI.lin.pred.lower)/(1 + exp(CI.lin.pred.lower))
+  CI.pi.upper <- exp(CI.lin.pred.upper)/(1 + exp(CI.lin.pred.upper))
+  list(lower = CI.pi.lower, upper = CI.pi.upper)
+}
+```
+
+When the GRE Score is 720, the GPA is 3.3, and the college major rank is 1, the estimated probability of admission is 
+$$
+\pi = \frac{\exp(\hat{\beta_0}+\hat{\beta_1}x_1+\hat{\beta_2}x_2+\hat{\beta_3}x_3+\hat{\beta_4}x_1^2+\hat{\beta_5}x_2^2+\hat{\beta_6}x_1*x_2)}{1 + \exp(\hat{\beta_0}+\hat{\beta_1}x_1+\hat{\beta_2}x_2+\hat{\beta_3}x_3+\hat{\beta_4}x_1^2+\hat{\beta_5}x_2^2+\hat{\beta_6}x_1*x_2)}
+$$
+with a corresponding confidence interval, which is calculated as follows:
+
+```{r}
+newdata <- with(admissions, data.frame(gre = 720, gpa = 3.3, rank = factor(1)))
+pred_prob <- round(predict(mod.fit.admit, newdata, type="response"),4)
+print(paste0("Estimated Probability: ",pred_prob))
+```
+
+```{r}
+pred_low <- round(ci.pi(newdata,mod.fit.obj=mod.fit.admit,alpha=0.05)$lower,4)
+pred_high <- round(ci.pi(newdata,mod.fit.obj=mod.fit.admit,alpha=0.05)$upper,4)
+print(paste0("Lower CI: ",pred_low))
+print(paste0("Upper CI: ",pred_high))
+```
+
+As a result, $\hat{\pi}$ = 0.5935 and the 95% confidence interval is 0.4345 < $\hat{\pi}$ < 0.7351. 
+
+
+
+
+
+
+
+
+\newpage
+
+# Binary Logistic Regression
+
+Load the `Mroz` data set that comes with the *car* library.
+```{r}
+head(Mroz)
+```
+
+## Question 4.1
+
+**Estimate a linear probability model. Interpret the model results. Conduct model diagnostics. Test the CLM model assumptions.**
+
+First, I can run the linear regression model: $\beta_0+\beta_1k5+\beta_2k618+\beta_3age+\beta_4wc+\beta_5hc+\beta_6lwg+\beta_7inc$.
+```{r}
+mroz.lm <- lm(as.numeric(lfp) ~ k5 + k618 + age + wc + hc + lwg + inc, data = Mroz)
+summary(mroz.lm)
+```
+As a result, the regression is: 2.144 - 0.295`k5` - 0.011`k618` - 0.013`age` + 0.126`wcyes` + 0.019`hcyes` + 0.123`lwg` - 0.007`inc`. The linear regression fitted a slightly downward sloping line between the probability of women in the work force and the explanatory variables. The intercept is 2.1435 and each coefficient represents a probability. For example, every additional year of age decreases the probability that the woman is in the labor force by about 1.3%. Many coefficients are statistically significant at 0.001 level, while the rest are not statistically significant for $\alpha$ = 0.05. These significant coefficients are `(Intercept)`, `k5`, `age`, `wcyes`, `lwg`, and `inc`. 
+
+Now that I have interpreted the model results, I can conduct model diagnostics and test the 6 classical linear model (CLM) assumptions.
+
+These assumptions are: 
+
+* Linearity
+
+* Random Sampling
+
+* No Perfect Collinearity
+
+* Zero Conditional Mean
+
+* Homoskedasticity
+
+* Normality of Residuals
+
+```{r}
+mroz.lm.res <- resid(mroz.lm)
+Mroz$residuals <- mroz.lm.res
+Mroz$index <- seq(1,nrow(Mroz))
+Mroz$predicted <- predict(mroz.lm)
+paste("Sample Size: ", nrow(Mroz))
+```
+
+```{r fig.width=5, fig.height=3, fig.align='center',warning=FALSE,message=FALSE}
+plot(mroz.lm, which = 5)
+```
+
+Here, the Residuals vs Leverage plot is used to identify points that are outliers and have a high influence on the model. Points that increase along the x-axis are increasing in leverage, which means that they have the most potential to affect coefficients. Yet, leverage is not the same as influence. I am mostly concerned with points that have a large Cook's distance. They could be extreme cases against the regression line and can alter the results if excluded from analysis. I can see that there are a few points that have a large Cook's distance, but they do not appear to be erroneous, so they can remain in the model.
+
+```{r fig.width=7, fig.height=4, fig.align='center',warning=FALSE,message=FALSE}
+resid <- ggplot(Mroz, aes(x=predicted, y=residuals)) + geom_point() + 
+  geom_hline(yintercept = 0, color = "red") + geom_smooth(method="loess", se=F)+
+  labs(y="Residual",x="Fitted", title="Residual vs Fitted Values")
+scale <- ggplot(Mroz, aes(x=predicted, y=sqrt(abs(residuals)))) + geom_point() + 
+  geom_hline(yintercept = 0, color = "red") + geom_smooth(method="loess", se=F)+
+  labs(y="Residual", x="Fitted", title="Scale Location Plot")
+resHist <- ggplot(Mroz, aes(residuals)) + 
+  geom_histogram(binwidth = 0.1, fill = "mediumturquoise",col="white",size=0.1)+  
+  labs(title="Histogram of Residuals",x = "Residuals", y = "Frequency")  
+my_qq <- ggplot(Mroz,aes(sample=residuals))+stat_qq()+stat_qq_line(color="red")+
+  labs(title="Normal Q-Q Plot",x="Theoretical Quantiles",y="Sample Quantiles")
+egg::ggarrange(resid, scale, resHist, my_qq, nrow = 2)
+```
+
+Linearity means that the model relies on variables that have a linear relationship, plus some amount of error. However, I can not confirm linearity in this model due to the Residuals vs Fitted plot, as there is indeed an apparent pattern among the data points. Also, the spline curve is not flat and fluctuates around the zero-line. These results mean that the model is not linear and does not satisfy the CLM Assumption of Linearity.
+
+Random sampling is important as the data needs to follow the population distribution and be independent and identically distributed (iid). I know that the data maintains this assumption because of where the data came from and how it was collected. The observations, from the Panel Study of Income Dynamics (PSID), are married women. As these married women were randomly selected, the model does satisfy CLM Assumption of Random Sampling.
+
+No perfect collinearity requires that no independent variables are constant and that there are no exact relationships among them. Multicollinearity can be assessed by examining tolerance and the VIF. Tolerance is a measure of collinearity represented by (1 - $R^2$). The VIF is 1/Tolerance and it's always greater than or equal to 1. Values of VIF that exceed 10 are often regarded as indicating multicollinearity.
+
+```{r}
+vif(mroz.lm)
+```
+
+Each of the VIFs are small (less than 2), which indicates that there is no multicollinearity in the model. As a result, it's fair to claim that the CLM Assumption of No Perfect Collinearity is satisfied.
+
+Zero conditional mean means that the value of explanatory variables contains no information about the mean of the unobserved factors, which is represented by $E(u_i | x_{i1},x_{i2},...,x_{ik})$ = 0. This then enforces linearity. Once again, I will take a look at the Residuals vs Fitted plot. Here, I can see that the assumption of zero conditional mean is not satisfied. The data is not centered around the zero-line. The mean does change drastically from left to right. So, values are extremely different for different values of x. Therefore, the model does not satisfy the CLM Assumption of Zero Conditional Mean.
+
+Homoskedasticity indicates that the variance of the error terms is constant. This is represented by $Var(u_i|x_{i1},x_{i2},...,x_{ik}) = \sigma^2$. Referring back to the Residual vs Fitted plot, there is no uniform thickness of points around the zero-line. This means that the variance of errors is not constant, which does not satisfy the assumption of homoskedasticity. Additionally, in the Scale Location plot, I can see that the band of residuals is not remotely horizontal. This reinforces the violation of homoskedasticity. Homoskedasticity can also be tested statistically with the Breusch-Pagan test.
+
+```{r}
+lmtest::bptest(mroz.lm)
+```
+As a result, the test reveals a p-value that is less than alpha = 0.05, meaning that it’s statistically significant. So, it’s fair to reject the null hypothesis of homoskedasticity, indicating that there is actually heteroskedasticity in the model. Thus, the model also does not satisfy the CLM Assumption of Homoskedasticity.
+
+The last assumption for CLM is that the errors are normally distributed, represented by $u_i = N(0, \sigma^2)$. Although the distribution can be considered be normal for large sample sizes by a version of the Central Limit Theorem, it's still important to check this condition. This strong assumption indicates that the errors are independent of the x's. The histogram of residuals reveals that the errors are not remotely normally distributed, revealing that the sixth assumption of the CLM is actually untrue despite asymptotic assumptions. The histogram is bi-modal, with peaks on either end of distribution. This is further reinforced by the Q-Q plot as it shows that most of the data points do not fall on the diagonal, making it a good indication of non-normality. As a result, the model does not satisfy the CLM Assumption of Normality of Residuals.
+
+As a result, a linear regression model is not necessarily suitable for this data set. The model does not satisfy four out of the six CLM Assumptions that are necessary for a proper linear regression, thus suggesting that a logistic regression model might perform better.
+
+
+
+## Question 4.2
+
+**Estimate a binary logistic regression.**
+
+First, I will have to create two new variables for the model, `age_squared` and `totalKids`.
+```{r}
+Mroz$age_squared <- (Mroz$age)^2
+Mroz$totalKids <- Mroz$k5 + Mroz$k618
+```
+
+Now, I can run the logistic regression model  $logit(\pi)=\beta_0+\beta_age+\beta_2inc+\beta_3wc+\beta_4hc+\beta_5lwg+\beta_6totalKids+\beta_7age\_squared$.
+```{r}
+mroz.glm <- glm(lfp ~ age + inc + wc + hc + lwg + totalKids + age_squared, 
+               family = binomial, data = Mroz)
+summary(mroz.glm)
+```
+
+As a result, $logit(\pi)$ = -5.2941 + 0.3180`age` - 0.0346`inc` + 0.6660`wcyes` + 0.0983`hcyes` + 0.5500`lwg` - 0.2225`totalKids` - 0.0041`age_squared`.
+
+
+## Question 4.3
+
+**Is the age effect statistically significant? **
+
+```{r}
+Anova(mroz.glm)
+```
+The LRT test points to the results that `age` does has a significant p-value for $\alpha$ = 0.05. Additionally, `age_squared` is also statistically significant. This indicates that both age and the quadratic result of age are important in explaining the odds of labor force participation for women. As a result, I can reject the null hypothesis that there is no effect from age on the model as `age` is statistically significant. 
+
+## Question 4.4
+
+**What is the effect of a decrease in age by $5$ years on the odds of labor force participation for a female who was $45$ years of age?**
+
+The odds ratio for a change in age by $c$ years is expressed in the following formula:
+$$
+OR = exp(c \beta_1 + c \beta_7(2 \times age  + c))
+$$
+which depends on the woman's age.
+
+```{r}
+c <- -5
+my_age <- 45
+age_OR <- c * exp(mroz.glm$coefficients['age'] + 
+                  mroz.glm$coefficients['age_squared']*(2*my_age + c))
+age_OR <- round(age_OR,4)
+my_change <- ifelse(c < 0, "decrease", "increase")
+cat("The estimated effect on the odds of larbor force participation is ",age_OR,"\n",
+   " given a ",abs(c)," year ",my_change," in age for a ",my_age," year old woman.")
+```
+
+The odds of success change by $e^{c(\beta_1 + \beta_7*(2*age + c))}$ = -4.8441 times for a 5 year decrease in age when a woman is 45 years old. As a result, the effect of a decrease in age by $5$ years on the odds of labor force participation for a female who was $45$ years of age is -4.8841.
+
+## Question 4.5 
+
+**Estimate the profile likelihood confidence interval of the probability of labor force participation for females who were $40$ years old, had income equal to $20$, did not attend college, had log wage equal to 1, and did not have children.**
+
+First, I can calculate the estimated probability for the given input values. I will also set the variable `hc` to "yes", indicating that the woman's husband did attend college.
+```{r}
+newdata <- with(Mroz,data.frame(age = 40, inc = 20, wc = "no", lwg = 1, hc = "yes",
+                                totalKids = 0, age_squared = (40)^2))
+pred_prob <- round(predict(mroz.glm, newdata, type="response"),4)
+print(paste0("Estimated Probability: ",pred_prob))
+```
+
+Now, I can calculate the corresponding profile likelihood confidence interval.
+
+In this context, "no" will be represented as 0 and "yes" will be represented by 1.
+```{r}
+K <- matrix(data = c(1, 40, 20, 0, 1, 1, 0, (40)^2), nrow = 1, ncol = 8) 
+linear.combo <- mcprofile(object = mroz.glm, CM = K)
+ci.logit.profile <- confint(object = linear.combo, level = 0.95)
+exp(ci.logit.profile$confint)/(1 + exp(ci.logit.profile$confint)) 
+```
+As a result, $\hat{\pi}$ = 0.6902 and the 95% profile likelihood confidence interval is 0.5857 < $\hat{\pi}$ < 0.7796. 
+
+
+
+
+
+
+
+\newpage
+
+# Maximum Likelihood 
+
+**Consider a model to estimate the kernel condition using the density explanatory variable as a linear term.**
+
+```{r warning=FALSE}
+wheat <- read_csv(paste0(here::here(),"/assignments/assignment_1/wheat.csv"))
+```
+I first need to get an overall idea of the data I am working with.
+
+```{r}
+head(wheat)
+```
+```{r}
+summary(wheat[2:8])
+```
+```{r}
+paste("Sample Size: ", nrow(wheat))
+```
+
+The multinomial categorical variable that I am focused on will be `type`.
+```{r}
+unique(wheat$type)
+```
+
+As a result, there are three categories: *Healthy*, *Sprout*, and *Scab*.
+
+Now, I can run the multinomial regression model.
+```{r}
+mod.nominal <- multinom(type ~  density, data = wheat)
+summary(mod.nominal)
+```
+The `multinom()` function uses *Healthy* as the categorical base level. Thus, the estimated regressions are:
+
+**Equation 1: Scab vs. Healthy**
+$$
+log \left( \frac{\widehat{\pi}_{Scab}}{\widehat{\pi}_{Healthy}} \right) = 29.3783 - 24.5622density
+$$
+
+**Equation 2: Sprout vs. Healthy**
+$$
+log \left( \frac{\widehat{\pi}_{Sprout}}{\widehat{\pi}_{Healthy}} \right) = 19.1217 - 15.4763density
+$$
+
+## Question 5.1 
+
+**Compute the log-likelihood function for the multinomial regression model.**
+
+I can determine the log-likelihood through its formula, where `m` represents the number of categories and `n` is the number of observations. 
+$$
+\Sigma_{i=1}^{n}  \Sigma_{j=1}^{m} y_j*log(\pi_j)  
+$$
+In this context, $y_i$ serves as a binary indicator as to whether that instance belongs to the given category or not. A value of "1" indicates that the instance belongs to that category and a value of "0" indicates that is does not. Collectively, these columns create a Y indicator matrix, where each column represents a category.
+
+I can calculate $\pi_j$, given one explanatory variable and J categories, as follows:
+$$
+\pi_1 = \frac{1}{1 + \Sigma_{j=2}^{J} exp(\beta_{j0} + \beta_{j1}*x_1)}
+$$
+and
+$$
+\pi_j = \frac{exp(\beta_{j0} + \beta_{j1}*x_1)}{1 + \Sigma_{j=2}^{J} exp(\beta_{j0} + \beta_{j1}*x_1)}
+$$
+for j = 2,..., J.
+
+
+First, I will set some variables.
+```{r}
+n_cat <- 3 
+n_feat <- 1
+```
+
+Next, I will store the coefficients from the model.
+```{r}
+betas <- c()
+max_beta <- (n_cat-1) + (n_cat-1)*n_feat
+for(i in 1:(n_cat-1)){
+  temp <- i
+  while(temp <= max_beta){
+    my_beta <- summary(mod.nominal)$coefficients[temp]
+    betas <- c(betas,my_beta)
+    temp <- temp + (1+n_feat)
+  }
+}
+```
+
+I can also form the Y indicator matrix. The columns will be a binary response for each of the different categories of the dependent variable `type`.
+```{r}
+y1 <- ifelse(wheat$type == "Healthy", 1,0)
+y2 <- ifelse(wheat$type == "Scab", 1,0)
+y3 <- ifelse(wheat$type == "Sprout", 1,0)
+my_Y <- cbind(y1,y2,y3)
+```
+
+Then, I can write an R function that computes the log-likelihood function for the multinomial regression model. The function will require parameters for the model coefficients, the dependent variable, as well as the Y indicator matrix.
+```{r}
+logL <- function(beta, x, Y){ 
+  mysum1 <- exp(beta[1] + beta[2]*x)
+  mysum2 <- exp(beta[3] + beta[4]*x)
+  sumTot <- mysum1 + mysum2
+  
+  my_pi1 <- (1/(1+sumTot))
+  my_pi2 <- (mysum1/(1+sumTot))
+  my_pi3 <- (mysum2/(1+sumTot))
+
+  sum(Y[,1]*log(my_pi1) + Y[,2]*log(my_pi2) + Y[,3]*log(my_pi3))
+} 
+```
+
+```{r} 
+logL(x = wheat$density, Y = my_Y, beta = betas) 
+```
+
+As a result, the MLE is calculated to be -229.7123.
+
+Now, I can verify that the computed value is the same as that produced by the `logLik()` function by comparing the results.
+```{r}
+logLik(mod.nominal)
+```
+
+I can see that the two function have the same output. Therefore, the same MLE values are produced and the custom function is validated.
+
+## Question 5.2 
+
+**Maximize the log-likelihood function using `optim()`. Compare your answers to what is obtained by `multinom()`.** 
+
+I can also try to optimize the parameters of the log-likelihood calculation with the `optim()` function.
+
+```{r}
+mle <- optim(betas, logL, x = wheat$density, Y = my_Y, hessian = TRUE,
+             control = list(fnscale = -1))
+mle
+```
+
+The components that result from the `optim()` function include the parameter estimates (\$par), the log-likelihood function’s maximum value (\$value), and the estimated covariance matrix (\$hessian). All of these values are practically the same as those produced by `multinom()`, where small differences are due to different convergence criteria for the iterative numerical procedures. The MLE value is exactly the same, while the parameter estimates are slightly different. Furthermore, I can see that the covariance matrix is symmetric along the diagonal. Overall, the `optim()` function reaffirms my earlier MLE results.
+
+

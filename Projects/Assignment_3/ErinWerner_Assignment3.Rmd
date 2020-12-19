@@ -1,0 +1,1375 @@
+---
+title: "W271 Assignment 3"
+author: "Erin Werner"
+date: "November 29th, 2020"
+header-includes:
+  - \usepackage{subfig}
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 3
+  html_document:
+    df_print: paged
+geometry: margin=1in
+---
+\newpage
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(car)
+library(readr)
+library(tseries)
+library(forecast)
+library(fable)
+library(fpp2)
+library(fpp3)
+library(gridExtra)
+library(grid)
+library(tsibble)
+library(tibble)
+library(mvtnorm)
+library(vars)
+library(lubridate)
+library(tidyverse)
+```
+
+# Question 1 - Time Series Linear Model
+
+The data set `Q1.csv` concerns the monthly sales figures of a shop which opened in January 1987 and sells gifts, souvenirs, and novelties. The shop is situated on the wharf at a beach resort town in Queensland, Australia. The sales volume varies with the seasonal population of tourists. There is a large influx of visitors to the town at Christmas and for the local surfing festival, held every March since 1988. Over time, the shop has expanded its premises, range of products, and staff.
+
+```{r}
+Q1 <- read_csv(paste0(here::here(),"/assignments/assignment_3/Q1.csv"))
+```
+
+To help with my analysis, I will create additional variables to help represent the time series in different ways. This includes individual month and year variables as well as a formal date variable. These additional features will provide different forms of time representation in my model.
+
+```{r}
+Q1$Month <- factor(rep(1:12, times = 7), labels = month.abb)
+Q1$Year <- factor(rep(1987:1993, each = 12))
+Q1$date <- as.Date(paste(Q1$Year, Q1$Month, '01',sep = '-'),format = '%Y-%b-%d')
+```
+
+The time series spans from the beginning of 1987 to the end of 1993.
+
+```{r fig.align='center'}
+t1 <- head(Q1)[,c(2,3,4)]
+t2 <- tail(Q1)[,c(2,3,4)]
+grid.arrange(tableGrob(t1), tableGrob(t2), ncol = 2)
+```
+
+
+
+**a) Produce a time plot of the data and describe the patterns in the graph. Identify any unusual or unexpected fluctuations in the time series.**
+
+First, I need to convert the data into a suitable time series object.
+
+```{r}
+sales_ts <- as_tsibble(Q1, index = date, regular = TRUE)
+```
+
+Then, I am able to produce a time plot for the series.
+
+```{r fig.width=6, fig.height=3.5, fig.align='center'}
+sales_ts %>% autoplot(sales,colour="maroon",size=1) + 
+  labs(title = "Australia Monthly Sales", x = "Year", y = "Sales")
+```
+
+From the time series plot, I can see a generally positive trend with reoccurring seasonal peaks. Overall, it appears that a similar pattern repeats each year as the sales start off low and increase gradually then experience a sharp peak followed by a smaller peak. Although the seasonal peaks are not unexpected due to the varying tourism, they are unusual in regards to their extreme increase in value. Additionally, the size of the seasonal fluctuations and random fluctuations seem to increase with the level of the time series, growing almost exponentially. As a result, the additive model is not appropriate for describing this time series. A multiplicative seasonal change would be better as the magnitude of the seasonal change increases over time as the data values increase. However, the extra variability can make multiplicative seasonal changes harder to forecast accurately. Thus, it may be necessary to transform the time series in order to produce a series that is viable for my forecasting model.
+
+It is often helpful to split a time series into several components, each representing an underlying pattern category. More generally, in order address the the trend, seasonal and irregular elements that are in the series, I can multiplicatively decompose the original time series into trend, seasonal and error components.
+
+```{r fig.width=6, fig.height=4.5, fig.align='center'}
+sts <- ts(sales_ts$sales, start = c(1987,1), end = c(1993,12), frequency = 12)
+sales.deco <- decompose(sts, type = "multiplicative")
+plot(sales.deco, yax.flip = TRUE)
+```
+
+From the plots, I can see that:
+
+* the overall sales have an upward trend with seasonality.
+
+* the sales trend is strong and upward. It appears to grow almost exponentially.
+
+* the sales seasonality fluctuates consistently, with repeating cycles of major peaks followed by smaller peaks. 
+
+* the variation in the remainder does not appear like white noise. There is inconsistent oscillation over time.
+
+I can also further examine these fluctuations by taking a closer look at the monthly and annual box plots.
+
+```{r fig.width=6.5, fig.height=3, fig.align='center',warning=FALSE,message=FALSE}
+p1 <- ggplot(Q1,aes(Month,sales)) + theme(legend.position = "none") + 
+  geom_boxplot(varwidth = T, aes(fill = Month)) + 
+  labs(x = "Month", y = "Sales", title = "Sales per Month")
+p2 <- ggplot(Q1,aes(Year,sales)) + theme(legend.position = "none") + 
+  geom_boxplot(varwidth = T, aes(fill = Year)) + 
+  labs(x = "Year", y = "Sales", title = "Sales per Year")
+egg::ggarrange(p1, p2, nrow = 1)
+```
+
+From the box plots, I can see that:
+
+* with respect to the change by the month, there is apparent seasonality in the series. There is a much higher distribution of sales in December compared to the rest of the year, with a slightly higher distribution in March as well. Yet, this is consistent with the seasonal tourist travel behavior.
+
+* with respect to the change by the year, there is a strong and consistent upward trend in sales. There is also a noticeably larger distribution of sales in more recent years, which is consistent with the shop's expansion of products and staff. This is indicative of exponential growth.
+
+These patterns in the time series indicate that it is necessary to perform a data transformation in order to build a successful model. This will lead to more reliable forecasts.
+
+**b) Explain why it is necessary to take logarithms of these data before fitting a model.**
+
+It is necessary to take logarithms of the sales data before fitting the model. This is because the size of the peaks in the data is not constant. As mentioned earlier, the size of the seasonal fluctuations and random fluctuations seem to increase with the level of the time series, growing almost exponentially. The extra variability can make multiplicative seasonal changes harder to forecast accurately. As a result, a transformation is required and log transforms are effective at removing exponential variance. So, this transformation should be applied to the time series before building my model.
+
+Furthermore, logarithm transformations are useful because they are more easily interpretable in analysis. This is because the interpretation reflects that changes in a log value are relative to percentage changes on the original scale. 
+
+**c) Use R to fit a regression model to the logarithms of these sales data with a linear trend, seasonal dummies and a "surfing festival" dummy variable.**
+
+The logarithmic model would take the form as follows: 
+
+$$
+log(y_t) = \beta_0 + \beta_1 t + \beta_2 t + \beta_3 t + \epsilon_t \\ 
+y_t = e^{\beta_0 + \beta_1 t + \beta_2 t + \beta_3 t + \epsilon_t}
+$$
+
+First, I need to perform the log transformation on the data and create a suitable time series object.
+
+```{r}
+Q1$sales_log <- log(Q1$sales)
+sales_ts_log <- as_tsibble(Q1, index = date, regular = TRUE)
+```
+
+Then, I am able to produce a time plot for the log-transformed series.
+
+```{r fig.width=6, fig.height=3.5, fig.align='center'}
+sales_ts_log %>% autoplot(sales_log, colour = "maroon", size = 1) + 
+  labs(title = "% Change in Monthly Sales", x = "Year", y = "% Change in Sales")
+```
+
+Now, I can see that the size of the seasonal and random fluctuations in the log-transformed time series seem to be roughly constant over time. They also do not depend on the level of the time series. The trend is still present, but appears to be more linear rather than exponential. Thus, the log-transformed time series can probably be described using an additive model. However, there is still a prevalent positive trend and oscillating seasonal variation in the log-series.
+
+I can also decompose the log-series and observe each of the trend, seasonal, and random components.
+
+```{r fig.width=6, fig.height=3.6, fig.align='center'}
+sts_log <- ts(sales_ts_log$sales_log,start=c(1987,1),end=c(1993,12),frequency=12)
+sales.deco_log <- decompose(sts_log, type = "additive")
+plot(sales.deco_log, yax.flip = TRUE)
+```
+
+From the plots, I can see that each of the components are very similar to the original series decomposition, although the trend is now linear. This will be important to consider in my model analysis, as the trend and seasonality are still prevalent and might require more manipulations or transformations.
+
+Before I build my model, the local surfing festival, which started in 1988, is held every March. So, I need to create a dummy variable to represent this effect. 
+
+```{r}
+sales_ts_log$surf <- ifelse(sales_ts_log$Month=="Mar"&sales_ts_log$Year!=1987,1,0)
+```
+
+Next, I am able to build my regression model to the logarithms of the sales data with a linear trend, seasonal dummies and a "surfing festival" dummy variable.
+
+```{r}
+exp.trend.fit <- lm(sales_log ~ date + Month + surf, data = sales_ts_log)
+summary(exp.trend.fit)
+```
+
+As a result, almost all the terms are statistically significant for $\alpha = 0.05$ and the resulting adjusted r-squared value is quite high with a value of 0.95. 
+
+Then, I can plot the actual values with the model to visually asses the fit.
+
+```{r fig.width=5, fig.height=3.8, fig.align='center'}
+plot(sales_log ~ date, data = sales_ts_log, type="l",main="Log-Transform Model")
+lines(fitted(exp.trend.fit) ~ date, data = sales_ts_log, col = "red")
+```
+
+From the plot, I can see that the model fits the trend and seasonal fluctuations very well. It follows the trend and major fluctuations, including the extreme peak values, in the series.
+
+I can also take a look at the residuals to further assess the model fit.
+
+**d) Plot the residuals against time and against the fitted values. Do these plots reveal any problems with the model?**
+
+The residuals, in a time series model, are what is left over after fitting a model. The residuals are equal to the difference between the observations and the corresponding fitted values. Residuals are useful in checking whether a model has adequately captured the information in the data.
+
+In order to produce good forecasts, the residuals must:
+
+* be uncorrelated. If there are correlations, than there is still information in them. So, they should not be used for forecasting.
+
+* have zero mean. If they do not, then the forecasts will be biased.
+
+* have constant variance.
+
+* be normally distributed.
+
+To start, I can plot the residuals against time and against the fitted values.
+
+```{r message=FALSE, warning=FALSE, fig.width=6.5, fig.height=4, fig.align='center'}
+par(mfrow=c(1,2))
+plot(exp.trend.fit$resid, type="l", main="Residuals vs Time")
+residualPlot(exp.trend.fit, main="Residuals vs Fitted")
+```
+
+From the residual vs time plot (above - left), there is no major apparent trend although the seasonality is still largely unaccounted for. Additionally, the variation of the residuals is not consistent across the data, as there are fluctuations of varying heights throughout the series. Therefore, the assumption of constant variance is violated for the model.
+
+From the residual vs fitted plot (above - right), I can see that the residuals follow a slight curve. Yet, the data is generally centered and dispersed around the zero-line and the mean does not change too drastically from left to right. So, the values are not necessarily different for different values of x. There is a somewhat flat band of points for the plot and the error is mostly zero in expectation. Thus, I can confirm the assumption of having zero mean as there is no apparent pattern among the data points.
+
+Yet, I can also take a closer look at the the histogram, the Q-Q Plot, the ACF, and the PACF of the residuals in order to further analyze the model fit.
+
+```{r message=FALSE, warning=FALSE, fig.width=6.3, fig.height=4.5, fig.align='center'}
+par(mfrow=c(2,2))
+hist(exp.trend.fit$resid, main = "Residual Histogram")
+qqPlot(exp.trend.fit$residuals, main = "Residual Q-Q Plot")
+acf(exp.trend.fit$resid, main="ACF of the Residual Series")
+pacf(exp.trend.fit$resid, main="ACF of the Residual Series")
+```
+
+From the additional residual plots, I can see that:
+
+* The histogram and Q-Q plot show a roughly normal distribution of residuals, with a slight departure around the extreme values. This is an indication of the normality of the residuals.
+
+* the ACF appears to gradually decline and oscillate around zero. This means I can expect a negative AR parameter for the random elements. Yet, there is a small spike around lag 10 indicating that there may be some correlation in the residuals.
+
+* the PACF appears to gradually decline and oscillate around zero. The PACF drastically cuts off after the second lag, indicating the potential need for a second order model. In general though, there does not seem to be major violations of non-correlation.
+
+Collectively, the residuals violate some of the underlying assumptions. Therefore, the plots reveal problems with constant variance in the model.
+
+**e) Do box plots of the residuals for each month. Does this reveal any problems with the model?**
+
+First, I need to create a monthly representation for my model residuals.
+
+```{r}
+resid_month <- factor(rep(1:12, times = 7), labels = month.abb)
+resid_values <- exp.trend.fit$resid
+resid_df <- data.frame("Month" = resid_month, "Value" = resid_values)
+```
+
+Then, I am able to produce a box plot for the monthly residuals.
+
+```{r fig.width=5, fig.height=3, fig.align='center',warning=FALSE,message=FALSE}
+ggplot(resid_df,aes(Month,Value)) + theme(legend.position = "none") + 
+  geom_hline(yintercept=0,lty="dashed")+geom_boxplot(varwidth=T,aes(fill=Month))+
+  labs(x = "Month", y = "Residuals", title = "Residuals per Month")
+```
+
+From the box plot, I can see that the residuals roughly maintain zero conditional mean per month. Although each of the months have varying residual distributions, they are all approximately centered around the zero-line. This assumption was satisfied for the overall data in the residuals vs fitted plot and grouping the data by month reaffirms this. Furthermore, as there are varying residual distributions, the box plot indicates that there is not constant variance in the model per month. This assumption was violated in the residual vs time plot and is also violated in the monthly box plot. This proves that our model does not satisfy all of the residual model assumptions.
+
+Therefore, the residuals do not satisfy each of the underlying assumptions, as the plot reveals no problems with the assumption of zero conditional mean but reveals problems with the assumption of constant variance with regards to monthly residuals. 
+
+**f) What do the values of the coefficients tell you about each variable?**
+
+To start, almost all of the coefficients for my model were statistically significant. 
+
+```{r}
+summary(exp.trend.fit)
+```
+
+According to the model, 
+
+* a unit increase in `date` (one day) shows an increase of 0.0007 percent in sales. This would roughly be a 0.02 percent increase in sales per month.
+
+* a unit increase in `MonthFeb` (change to February) shows a 0.25 percent increase in sales.
+
+* a unit increase in `MonthMar` (change to March) shows an increase of 0.27 percent in sales.
+
+* a unit increase in `MonthApr` (change to April) shows a 0.38 percent increase in sales.
+
+* a unit increase in `MonthMay` (change to May) shows a 0.41 percent increase in sales.
+
+* a unit increase in `MonthJun` (change to June) shows an increase of 0.45 percent in sales.
+
+* a unit increase in `MonthJul` (change to July) shows a 0.61 percent increase in sales.
+
+* a unit increase in `MonthAug` (change to August) shows an increase of 0.59 percent in sales.
+
+* a unit increase in `MonthSep` (change to September) shows a 0.67 percent increase in sales.
+
+* a unit increase in `MonthOct` (change to October) shows a 0.74 percent increase in sales.
+
+* a unit increase in `MonthNov` (change to November) shows an increase of 1.207 percent in sales.
+
+* a unit increase in `MonthDec` (change to December) shows a 1.963 percent increase in sales.
+
+* a unit increase in `surf` (change to the surfing festival in March) shows an increase of 0.50 percent in sales. 
+
+These values indicate that there is a generally positive trend in sales, as each variable leads to an increase in percent of sales over time.
+
+**g) What does the Breusch-Godfrey test tell you about your model?**
+
+The Breusch-Godfrey test checks for higher-order serial correlation. This is conducted by using the `bgtest()` function. In the context of an BG test, $H_0$ is that there is no serial correlation of any order up to p, with rejection ($H_A$) indicating that the series does have serial correlation up to order p. I can apply my Breusch-Godfrey test for order 1 on my series, as my series is of order 0.
+
+```{r}
+bgtest(exp.trend.fit, order = 1)
+```
+
+The resulting p-value of the BG test is 5.775e-07, which is less than $\alpha = 0.05$. So, I will reject the null hypothesis that the series has no serial correlation of up to order 1. This is an indication that my model has serial correlation in it.
+
+I can also test for the significance of the correlation in the model residuals using the Ljung–Box test.
+
+```{r}
+Box.test(exp.trend.fit$residuals)
+```
+
+The resulting p-value of the LB test is 7.359e-07, which is less than $\alpha = 0.05$. As a result, I can reject the null hypothesis that the series is uncorrelated. This is further evidence that correlation does exist in the model.
+
+Therefore, the Breusch-Godfrey test tells me that there is correlation in my model.
+
+**h) Regardless of your answers to the above questions, use your regression model to predict the monthly sales for 1994, 1995, and 1996. Produce prediction intervals for each of your forecasts.**
+
+First, I can generate forecasts from my model for 1994, 1995, and 1996.
+```{r}
+sts_log <- ts(sales_ts_log,start=c(1987,1),end=c(1993,12),frequency=12)
+fit.forcast <- tslm(sales_log ~ trend + Month + surf, data = sts_log)
+h <- 3
+new_data_s <- data.frame(surf = c(0,0,1,0,0,0,0,0,0,0,0,0), 
+                         Month=c(1,2,3,4,5,6,7,8,9,10,11,12))
+fcast.up <- forecast(fit.forcast, newdata = data.frame(
+                 surf = rep(new_data_s$surf,h),Month = rep(new_data_s$Month,h)))
+```
+
+Then, I can plot the results. This will include the actual values as well as the predicted values and their confidence intervals, up to the end of 1996.
+
+```{r fig.width=5, fig.height=3, fig.align='center'}
+autoplot(sts_log[,"sales_log"]) + ylab("% Change in Monthly Sales") + 
+  autolayer(fcast.up, PI = TRUE)
+```
+
+From the plot, I can see that the predicted values follow the positive upwards trend and oscillate in a similar, yet slightly less extreme pattern of repeated peaks. The confidence intervals follow this behavior as well.
+
+I can also calculate the confidence intervals for each the annual forecasts and print out the prediction intervals for each of my forecasts in 1994, 1995, and 1996.
+
+```{r}
+fcast.up
+```
+
+From the forecast data frame, I can see that the predicted values (`Point Forecast`) oscillate, but generally trend upwards. This is also the case for each of the confidence intervals.
+
+**i) Transform your predictions and intervals to obtain predictions and intervals for the raw data.**
+
+In order to obtain the predictions and intervals for the raw data, I can transform my results by exponentiating them, as this will "undo" the log transformation. 
+
+```{r}
+fs <- data.frame(fcast.up)
+exp_fs <- exp(fs)
+exp_fs
+```
+
+From the forecast data frame, I can once again see that the predicted values for the raw data (`Point.Forecast`) oscillate, but generally trend upwards. This is also the case for the confidence intervals.
+
+**j) How could you improve these predictions by modifying the model?**
+
+A primary assumption for time series forecasting is that the data are stationary. Stationarity means that the series are normally distributed and the mean and variance are constant over a long time period. Therefore, the approaches in which I would modify my model would help to ensure this assumption.
+
+One approach to improving my predictions would be to take the first difference of the series. First-differencing a time series will remove a linear trend. The log transformation helped reduce the exponential growth observed in the model, but there was still an obvious linear trend in the log-series. So, differencing the series by an order of 1 would help to address the trend that is still prevalent in the series. This would then lead to a stationary series that would produce more accurate forecasts.
+
+I can evaluate the stationarity of the series by using a KPSS test.
+
+```{r}
+print("Original series: ")
+kpss.test(sales_ts_log$sales_log)
+
+print("First Difference: ")
+kpss.test(diff(sales_ts_log$sales_log, 1))
+```
+
+The resulting p-value for the original log-series of the KPSS test is 0.01, which is less than $\alpha = 0.05$. So, I can reject the null hypothesis that the series is stationary. Then, testing the first difference of the log-series, I see that the series becomes stationary and no higher degree of differencing is warranted. Thus, the first-difference modification to my model would help to improve my model stationarity and my forecasting predictions.
+
+Another approach would be to decompose the model and remove the trend and seasonal variation. As seen in `Part 1A` and `Part 1C`, the decomposition model reduces the time series into three components: trend, seasonal effects, and random errors. In order to forecast accurately, I want to model the random errors as some form of stationary process. From the decomposition plots, I know that there is still prevalent trend and seasonality in both the original and log transformed series. So, to achieve stationarity, I could decompose the time series and remove these effects. This would be accomplished by dividing the series by the trend and seasonal variation in the original multiplicative series or subtracting the components from the additive log-series. Thus, the model would then be built on a stationary series, satisfying model assumptions, that would lead to more reliable forecasts.
+
+Overall, these data modifications to my model would help to improve my predictions.
+
+\newpage
+
+# Question 2 - Cross-Validation
+
+The `gafa_stock` data set from the `tsibbledata` package contains historical stock price data for Google, Amazon, Facebook and Apple.
+
+**a) Define the accuracy measures returned by the `accuracy` function. Explain how the given code calculates these measures using cross-validation.**
+
+To start, I can take a closer look at the measures returned by the `accuracy()` function.
+
+```{r message=FALSE}
+google_stock <- gafa_stock %>% filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>% update_tsibble(index = day, regular = TRUE)
+google_2015 <- google_stock %>% filter(year(Date) == 2015)
+google_fit <- google_2015 %>%
+  model(Mean = MEAN(Close), `Naïve` = NAIVE(Close), Drift = RW(Close ~ drift()))
+google_jan_2016 <- google_stock %>% filter(yearmonth(Date)==yearmonth("2016 Jan"))
+google_fc <- google_fit %>% forecast(google_jan_2016)
+
+google_fc %>% accuracy(google_stock)
+```
+
+From the accuracy results, I can see that:
+
+* `ME` represents the Mean Error. The mean error refers to the average of all the errors in a set. An “error” in this context is an uncertainty in a measurement, or the difference between the measured value and true/correct value (residual). 
+
+$$
+ME = \frac{1}{n}\sum_{t=1}^{n}e_t
+$$
+
+* `RMSE` represents the Root Mean Squared Error. Root Mean Square Error (RMSE) is the standard deviation of the residuals, as it refers to the square root of the average of the squared error terms. The RMSE is a measure of how spread out these errors/residuals are. 
+
+$$
+RMSE = \sqrt{\frac{1}{n}\sum_{t=1}^{n}e_t^2}
+$$
+
+* `MAE` represents the Mean Absolute Error. The mean absolute error refers to the average of the absolute value of all the residuals in a set.
+
+$$
+MAE = \frac{1}{n}\sum_{t=1}^{n}|e_t|
+$$
+
+
+* `MPE` represents the Mean Percentage Error. The MPE is the computed average of percentage errors by which forecasts of a model differ from actual values of the quantity being forecast. This metric performs better in the case when the forecast and actual measurements have a trend.
+
+$$
+MPE = \frac{100\%}{n}\sum_{t=1}^{n}\frac{e_t}{y_t}
+$$
+
+* `MAPE` represents the Mean Absolute Percentage Error. The mean absolute percentage error is the computed absolute average of percentage errors by which forecasts of a model differ from actual values of the quantity being forecast. This metric looks at the relative error in the forecast and 'actual' measurements.
+
+$$
+MAPE = \frac{100\%}{n}\sum_{t=1}^{n}\left |\frac{e_t}{y_t}\right|
+$$
+
+* `MASE` represents the Mean Absolute Scaled Error. It is the mean absolute error of the forecast values, divided by the mean absolute error of the in-sample one-step naive forecast. The MASE is a scale-free error metric that gives each error as a ratio compared to a baseline's average error.
+
+$$
+MASE = \frac{MAE}{MAE_{in-sample, naive}}
+$$
+
+* `ACF1` represents the Autocorrelation of errors at lag 1. A lag 1 autocorrelation is the correlation between values that are one time period apart. It is a measure of how much is the current value influenced by the previous values in a time series.
+
+$$
+r_k = \frac{\sum^{N-k}_{i=1}(Y_i - Y)(Y_{i+k} - Y)}{\sum^{N}_{i=1}(Y_i - Y)^2}
+$$
+
+
+In general, cross-validation, or out-of-sample testing, is a validation technique for assessing how the results of a statistical analysis will generalize to an independent data set. It is useful for prediction as it estimates how accurately a model will perform in practice. This out-of-sample cross-validation is accomplished by withholding some of the known data to act as a test set. The remaining data is used to train the model and then the withheld data is used to measure the accuracy of the models predictions. This is achieved as the various measures take the difference between the observed known outcome values and the values predicted by the model.
+
+More specifically, the given code calculates all of the above measures using cross-validation. This is accomplished as the `accuracy()` function measures test set forecast accuracy based on ["actual data" - "forecast data"]. In this context, `google_stock` is the observed known outcomes ("actual data") and `google_fc` is a forecast object that contains the predicted values ("forecast data").
+
+Therefore, cross-validation can be used in order to estimate how the model is expected to perform in general when used to make predictions on data not used during the training of the model.
+
+
+**b) Obtain Facebook stock data from the `gafa_stock` dataset. Use cross-validation to compare the RMSE forecasting accuracy of naive and drift models for the `Volume` series, as the forecast horizon is allowed to vary.**
+
+To start, I will retrieve the Facebook stock data from the `gafa_stock` dataset and focus on the `Volume` series.
+
+```{r}
+facebook_stock <- gafa_stock %>% filter(Symbol == "FB") %>% 
+  mutate(day = row_number()) %>% update_tsibble(index = day, regular = TRUE)
+```
+
+```{r fig.align='center'}
+t1 <- head(facebook_stock)[,c(2,8)]
+t2 <- tail(facebook_stock)[,c(2,8)]
+grid.arrange(tableGrob(t1), tableGrob(t2), ncol = 2)
+```
+
+From the tables, I can see that the data spans from the start of 2014 to the end of 2018. So, my year of interest will be 2018, which will be filtered out as a 'test set' in order to perform my cross-validation. 
+
+I will create a single test set (`fb_2018`), that includes all of 2018, as well as a series of 'test sets' (`fb_2018_tr`), each consisting of one observation and corresponding to a 'training set' consisting of the prior observations. 
+
+```{r}
+fb_2018 <- facebook_stock %>% filter(year(Date) == 2018)
+fb_2018_tr <- fb_2018 %>% slice(1:(n()-1)) %>% stretch_tsibble(.init=3, .step=1)
+```
+
+Then, I can first fit the naive and drift models to the Facebook data for 2018 and plot the results with the actual values for the single test set (`fb_2018`).
+
+```{r}
+fb_fit <- fb_2018 %>% model(`Naïve` = NAIVE(Volume),Drift = RW(Volume ~ drift()))
+```
+
+```{r message=FALSE, fig.width=6, fig.height=3.5, fig.align='center'}
+fb_jan_2018 <- facebook_stock %>% filter(year(Date) == "2018")
+fb_fc_p <- fb_fit %>% forecast(fb_jan_2018)
+
+fb_fc_p %>% autoplot(fb_2018,level=NULL) + autolayer(fb_jan_2018,Volume,color='black') +
+  xlab("Day") + ggtitle("2018 FB Stock Forecast") + ylab("Volume") +
+  guides(colour=guide_legend(title="Forecast"))
+```
+
+From the plot, I can see that both models are fairly conservative as they are strictly linear. Neither model fits the fluctuations of the the data, but they do appear to roughly span the mean value of the series. Yet, the Drift model has a positive slope and increases slightly overtime, where the Naïve model maintains a zero-slope. So, I can also compare the RMSE scores of each model in order to determine which one actually better fits the series.
+
+```{r}
+fb_fc_p %>% accuracy(facebook_stock)
+```
+
+In general, lower values of RMSE indicate better fit. However, because the RMSE has the same unit as the dependent variable, there is no set scale that would suggest how small is good or how large is bad - there is no absolute standard. Yet, as the dependent variable for both models is `Volume`, the two scores will have the same units and can be compared to one another.
+
+From the single-fold cross-validation accuracy results, I can see that the RMSE score is:
+
+* 19337527 for the Drift model.
+
+* 19362901 for the Naïve Model.
+
+As a result, the Drift model has a smaller score, which means that it would be a better fit for the series. However, this was performed on a single test set. So, I can also use my series of 'test sets' (`fb_2018_tr`) in order to increase the number of folds in my cross-validation. This will help reduce some bias and variation in my forecast results.
+
+```{r}
+fb_fc <- fb_2018_tr %>% model(`Naïve` = NAIVE(Volume), Drift = RW(Volume ~ drift())) %>% 
+  forecast(h=1)
+```
+
+Then, I can use the k-fold cross-validation to compare the RMSE forecasting accuracy of the Naïve and Drift models.
+
+```{r message=FALSE}
+fb_fc %>% accuracy(facebook_stock)
+```
+
+From the k-fold cross-validation accuracy results, I can see that the RMSE score is:
+
+* 16828057 for the Drift model.
+
+* 16632932 for the Naïve Model.
+
+Once again, lower values of RMSE indicate better fit and the dependent variable for both models is `Volume`, so the two scores can be compared to one another. Therefore, I can see that the Naïve Model now has a lower RMSE score, which indicates that it is actually a better fit for the series.
+
+Overall, I was able to use cross-validation to compare the RMSE forecasting accuracy of Naïve and Drift models for the 2018 Facebook `Volume` series.
+
+
+\newpage
+
+# Question 3 - ARIMA Model
+
+Consider `fma::sheep`, the sheep population of England and Wales from 1867–1939.
+
+```{r message=FALSE}
+library(fma)
+head(fma::sheep)
+```
+
+**a) Produce a time plot of the time series.**
+
+First, I need to convert the data into a suitable time series object.
+
+```{r}
+sheep_ts <- as_tsibble(sheep, regular = TRUE)
+```
+
+```{r fig.align='center'}
+t1 <- head(sheep_ts)
+t2 <- tail(sheep_ts)
+grid.arrange(tableGrob(t1), tableGrob(t2), ncol = 2)
+```
+
+Then, I am able to produce a time plot for the series.
+
+```{r fig.width=6, fig.height=3.2, fig.align='center'}
+sheep_ts %>% autoplot(value,colour="maroon",size=1) + labs(x="Year",y="Sheep")
+```
+
+From the plot, I can see that the annual sheep population generally has a negative trend. The value fluctuates over a downward trend, with peaks and valleys of varying heights. The maximum sheep population is about 2360 (in 1868) and the minimum is 1350 (in 1920). Yet, this minimum value occurred in a particularly low period and the population rose slightly afterwards. Overall, the series appears to oscillate downwards. 
+
+I can further examine the series by decomposing the original time series into its trend and random components.
+
+```{r fig.width=6, fig.height=3.5, fig.align='center'}
+sheep_ts %>% model(STL(value)) %>% components() %>% autoplot()
+```
+
+From the plots, I can see that:
+
+* the overall sheep population has a fluctuating downward trend with seasonality.
+
+* the population trend is generally downward. However, the downward trend is not extremely persistent as there are also some upward fluctuations.
+
+* the random element fluctuates somewhat consistently, with oscillating peaks. 
+
+These trend and random patterns in the time series will be important to consider in building my model in order to generate reliable forecasts.
+
+**b) Assume you decide to fit the following model:**
+$$
+y_t=y_{t-1}+\phi_1(y_{t-1}-y_{t-2})+\phi_2(y_{t-2}-y_{t-3})+\phi_3(y_{t-3}-y_{t-4})+\epsilon_t
+$$ 
+**where $\epsilon_t$ is a white noise series. What sort of ARIMA model is this (i.e., what are p, d, and q)? Express this ARIMA model using backshift operator notation.**
+
+An Auto Regressive model takes the form of the following:
+$$
+Y_t = \sum^{p}_{j=1} \phi_j Y_{t-j} + \omega_t
+$$
+
+where $\omega_t$ ~ N(0, $\sigma^2$).
+
+Furthermore, the formula for a differenced series is:
+$$
+Y^{'}_t = Y_t - Y_{t-1}
+$$
+Therefore, based on the given formula, the model I am trying to fit is an auto regressive model with an order of 3 (an AR(3)). It is also of the first difference of the series. This is due to the fact that there are three AR terms, which are represented by the difference between two subsequent time periods. There are also no moving average components present in the model. Therefore, in this model, **`p` = 3, `d` = 1, and `q` = 0.**
+
+```{r}
+mod <- sheep_ts %>% model(ARIMA(value ~ 0 + pdq(3,1,0)))
+mod %>% report()
+```
+
+The model in back-shift notation is below.
+
+$$
+(1 - 0.4210B + 0.2018B^2 + 0.3044B^3)(1-B)y_t = c + \epsilon_t
+$$
+
+I can then assess the fit of this model by examining the residuals.
+
+```{r fig.width=6, fig.height=3.5, fig.align='center'}
+mod %>% gg_tsresiduals() 
+```
+
+The residuals are normally distributed and do not have an apparent trend, indicating leftover white noise. The ACF does not have an apparent trend and oscillates around zero. As a result, my model satisfies all of the necessary assumptions.
+
+Therefore, the AR(3) of the differenced series is an appropriate model for the sheep population time series.
+
+**c) By examining the ACF and PACF of the differenced data, explain why this model is appropriate.**
+
+First, I need to perform the first order difference and convert the data into a suitable time series object.
+
+```{r}
+diff_sheep_ts <- as_tsibble(diff(sheep), regular = TRUE)
+```
+
+Then, I am able to produce a time plot for the differenced series.
+
+```{r fig.width=6, fig.height=3.2, fig.align='center'}
+diff_sheep_ts %>% autoplot(value, colour = "maroon", size = 1) + 
+  labs(x = "Year", y = "Change in Sheep Population")
+```
+
+From the plot, I can see that there is no major trend remaining in the series, as the series now oscillates around the zero-line. There is still prevalent seasonality, which fluctuates somewhat consistently throughout the time series.
+
+I can further examine the series by decomposing the differenced data into its trend and random components.
+
+```{r fig.width=6, fig.height=3.5, fig.align='center'}
+diff_sheep_ts %>% model(STL(value)) %>% components() %>% autoplot()
+```
+
+From the plots, I can see that:
+
+* the overall differenced sheep population appears to be stationary and has fluctuating seasonality with no major trend.
+
+* the differenced population trend is generally flat. However, there are some deviating fluctuations in the more recent years, both upwards and downwards.
+
+* the differenced random element fluctuates somewhat persistently, with nearly constant variance.  
+
+Then, I can examine the ACF and PACF of the differenced data
+
+```{r fig.width=6, fig.height=3.5, fig.align='center', warning=FALSE}
+p1 <- ggAcf(diff_sheep_ts$value, lag.max = 104, main = "ACF of Change in Sheep")
+p2 <- ggPacf(diff_sheep_ts$value, lag.max = 104, main = "PACF of Change in Sheep")
+egg::ggarrange(p1, p2, nrow = 1)
+```
+
+From the plot, I can see that:
+
+* the ACF gradually declines and oscillates around the zero-line. This means I can expect a negative AR parameter for the random elements. There is a slight spike around lag 17, which indicates that there could be some correlation, not just a statistical fluke, in the model. But, this is only a slight deviation and there does not appear to be any other indications of correlation in the differenced series.
+
+* the PACF drastically cuts off after the third lag, reinforcing the notion that I should a apply an AR of order 3 in my model. It then gradually declines and oscillates around the zero-line. Although there is a slight spike at lag 17, there doesn't appear to any other major indications of correlation present in the model. 
+
+As a result, the differenced series does not violate the assumption of stationarity or of non-correlation for building a model. Therefore, the differenced model is appropriate. 
+
+**d) The last five values of the series are given below:**
+
+|Year              | 1935| 1936| 1937| 1938| 1939|
+|:-----------------|----:|----:|----:|----:|----:|
+|Millions of sheep | 1648| 1665| 1627| 1791| 1797|
+
+
+**The estimated parameters are ** $\phi_1=0.42$, $\phi_2=-0.20$, & $\phi_3=-0.30$.
+**Without using the forecast function, calculate forecasts for the next three years (1940–1942).**
+
+Given the model:
+
+$$
+y_t=y_{t-1}+\phi_1(y_{t-1}-y_{t-2})+\phi_2(y_{t-2}-y_{t-3})+\phi_3(y_{t-3}-y_{t-4})+\epsilon_t
+$$
+
+I am able to calculate forecasts for the next three years (1940-1942) by hand. This is done by using the values for the past four years in the model, given the $\phi_i$ variables. 
+
+First, I will create a data frame for the last five years and set the $\phi_i$ variables.
+
+```{r}
+phi_1 <- 0.42
+phi_2 <- -0.20
+phi_3 <- -0.30
+last_five <- data.frame(Year = c(1935,1936,1937,1938,1939),
+                        Sheep = c(1648,1665,1627,1791,1797))
+```
+
+Then, I can determine my forecasts. In order to predict values for 1940-1942, I will first need to calculate the prediction for 1940, based on the previous four years, and subsequently use that value in my following calculations. This is accomplished in the loop below.
+
+```{r}
+set.seed(8580)
+my_year <- c(1940,1941,1942)
+my_yt <- c()
+ 
+for(i in my_year){
+  y_t1 <- last_five[which(last_five$Year==(i-1)),]$Sheep
+  y_t2 <- last_five[which(last_five$Year==(i-2)),]$Sheep
+  y_t3 <- last_five[which(last_five$Year==(i-3)),]$Sheep
+  y_t4 <- last_five[which(last_five$Year==(i-4)),]$Sheep
+  
+  y_t <- y_t1 + phi_1*(y_t1 - y_t2) + phi_2*(y_t2 - y_t3) + 
+    phi_3*(y_t3 - y_t4)  + rnorm(1)
+  my_yt <- c(my_yt, y_t)
+  last_five <- rbind(last_five,c(i,y_t))
+}
+
+results <- data.frame(Year = my_year, Predictions = my_yt)
+results
+```
+
+Now that I have manually computed the forecast values, I can compare my results with the actual `forecast()` function.
+
+```{r}
+mod %>% forecast(h = 3)
+```
+
+My by-hand results are very similar to the `forecast()` function results (`.mean`), with the variation most likely due to the random element in the calculations. As a result, I predict that the sheep population will decline from 1940 to 1942.
+
+**e) Find the roots of your model's characteristic equation and explain their significance.** 
+
+The roots of a model's characteristic equation are significant as they are an indication of stationarity in the model. This is a crucial assumption for time series models in order to produce reliable forecasts. 
+
+First, I can produce the value of the roots for my model's characteristic equation.
+
+```{r}
+glance(mod)$ar_roots
+```
+
+I can also plot the root values on the unit circle. There is an indication of stationarity in the model if the roots are within the bounds of the unit circle.
+
+```{r fig.width=6, fig.height=3, fig.align='center'}
+gg_arma(mod)
+```
+
+From the plot, I can see that each of the roots are within the unit circle, which means that the AR(3) model of the first differenced series satisfies the assumption of stationarity.  
+
+I can also statistically test for unit roots in the series. In the context of an ADF test, $H_0$ is the presence of a unit root, with rejection ($H_A$) indicating that the series does not have a unit root. The presence of a unit root would mean that the series is not stationary.
+
+```{r}
+adf.test(diff_sheep_ts$value)
+```
+
+The resulting p-value of the ADF test is 0.02, which is less than $\alpha$ = 0.05. So, I can reject the null hypothesis that the series does have a unit root. This is an indication that the series is actually stationary.
+
+Therefore, the roots of the model's characteristic equation are significant as they affirm the important assumption of model stationarity. 
+
+\newpage
+
+# Question 4 - Model Averaging
+
+**Apply a Holt-Winters model to the ECOMPCTNSA time series data recorded in `Q4.csv`. Compare this model's forecasting performance to that of a seasonal ARIMA model using cross-validation. Then compare both of these models to the performance of a simple average of the ARIMA and Holt-Winters models.**
+
+A Holt-Winters Filtering of a time series is a classical form of exponential smoothing model. Exponential smoothing models are categorized by error, trend and seasonal components, which if present may be additive or multiplicative.
+
+To start, I can load the data set and examine the `ECOMPCTNSA` variable.
+
+```{r}
+Q4 <- read_csv(paste0(here::here(),"/assignments/assignment_3/Q4.csv"))
+```
+
+```{r fig.align='center'}
+t1 <- head(Q4,10)
+t2 <- tail(Q4,10)
+grid.arrange(tableGrob(t1), tableGrob(t2), ncol = 2)
+```
+
+From the tables, I can see that the time series records values quarterly. There is a consistent time pattern with regular gaps between the observations.
+
+In order to conduct my analysis, I first need to convert my data into a suitable time series object.
+
+```{r}
+ecom <- Q4 %>% mutate(DATE = dmy(DATE)) %>% as_tsibble(index = 'DATE') %>% 
+  mutate(DATE = yearquarter(DATE)) %>% rename(date = DATE, value = ECOMPCTNSA)
+ecomp_ts <- as_tsibble(ecom, index = date, regular = TRUE)
+```
+
+Then, I can plot the quarterly ECOMPCTNSA time series.
+
+```{r fig.width=6, fig.height=3.2, fig.align='center'}
+ecomp_ts %>% autoplot(value, colour = "maroon", size = 1) + 
+  labs(title = "ECOMPCTNSA Time Series", x = "Date ", y = "ECOMPCTNSA")
+```
+
+From the plot, I can see that there is a strong upward trend with prevalent seasonality. The size of the trend, seasonal, and random fluctuations seem to increase with the level of the time series, growing almost exponentially. As a result, a multiplicative seasonal change might be most applicable as the magnitude of the trend and seasonal change appear to increase over time as the data values increase. Yet, I can still apply both additive and multiplicative models and compare their forecasting performance.
+
+I can also examine the series by decomposing the time series into its trend and seasonal components.
+
+```{r fig.width=6, fig.height=3.6, fig.align='center'}
+ecomp_ts %>% model(STL(value)) %>% components() %>% autoplot()
+```
+
+From the plots, I can see that:
+
+* the overall series appears to have a strong upward trend with fluctuating seasonality. Both the trend and seasonality seem to grow larger over time.
+
+* the trend is strong and consistent in its upward rise. It appears to grow linearly.
+
+* the seasonality fluctuates persistently, with variance that increases over time.
+
+* the random element appears somewhat like white noise. Its variation oscillates almost randomly throughout the series.
+
+As the trend is more linear and the seasonality is more exponential, it is possible that the additive model might actually be more applicable in this context. Overall, these trend and seasonal patterns in the time series will be important to consider in building my model in order to generate reliable forecasts. 
+
+Then, I can apply a Holt-Winters model to the ECOMPCTNSA time series data, in both additive and multiplicative variants.
+
+```{r message=FALSE, fig.width=6.5, fig.height=3.4, fig.align='center'}
+fit <- ecomp_ts %>%
+  model(additive = ETS(value ~ trend("A") + season("A") + error("A")),
+    multiplicative = ETS(value ~ trend("M") + season("M") + error("M")))
+fc <- fit %>% forecast(h = "3 years")
+fc %>% autoplot(ecomp_ts, level = NULL) + xlab("Year") + ylab("ECOMPCTNSA")
+```
+
+From the plot, I can see that both model forecasts follow the increasing trend and fluctuating seasonality of the series. Yet, the multiplicative forecast increases almost exponentially where the additive model increases more linearly. 
+
+Next, I can compare each model's forecasting performance to that of a seasonal ARIMA model using cross-validation. In order to use cross-validation, I need to split my current data into a training and test set. The training set will be used to build the different models. The test set, which will consist of the values from the last two years of the series, will be withheld and used to measure cross-validation accuracy between each of the models.
+
+```{r}
+ecomp_train <- ecomp_ts %>% filter_index('1999 Q4'~'2017 Q4')
+ecomp_test <- ecomp_ts %>% filter_index('2017 Q4'~'2019 Q4')
+```
+
+```{r message=FALSE, fig.width=6.5, fig.height=3.4, fig.align='center'}
+fit <- ecomp_train %>%
+  model(additive = ETS(value ~ trend("A") + season("A") + error("A")),
+    multiplicative = ETS(value ~ trend("M") + season("M") + error("M")),
+    arima = ARIMA(value ~ trend() + season()))
+fc <- fit %>% forecast(h = "2 years")
+fc %>% autoplot(ecomp_train, level = NULL) + xlab("Year") + ylab("ECOMPCTNSA")
+```
+
+In order to compare each model's forecasting, I will consider the RMSE and MAPE score. As mentioned in `Part 2`, the RMSE is the standard deviation of the residuals, as it refers to the square root of the average of the squared error terms, and the MAPE is the computed absolute average of percentage errors by which forecasts of a model differ from actual values of the quantity being forecast. In general, lower values of RMSE or MAPE indicate a better fit. 
+
+```{r}
+fc %>% accuracy(ecomp_test)
+```
+
+From the results, I can see that:
+
+* the RMSE is 0.17 and the MAPE is 1.57 for the additive model
+
+* the RMSE is 0.44 and the MAPE is 3.64 for the multiplicative model
+
+* the RMSE is 0.27 and the MAPE is 1.71 for the ARIMA model
+
+Thus, the additive model has the lowest RMSE and MAPE, which means that it fits the ECOMPCTNSA series the best out of these models. 
+
+Last, I can then compare these models to the performance of a simple average of the ARIMA and Holt-Winters model. As the additive model performed better than the multiplicative model, I will average the additive model with the ARIMA model for this comparison. 
+
+```{r message=FALSE, fig.width=6.5, fig.height=3.4, fig.align='center'}
+fit <- ecomp_train %>%
+  model(additive = ETS(value ~ trend("A") + season("A") + error("A")),
+        arima = ARIMA(value ~ trend() + season())) %>% 
+  mutate(avg = (additive + arima)/2)
+fc <- fit %>% forecast(h = "2 years")
+fc %>% autoplot(ecomp_train, level = NULL) + xlab("Year") + ylab("ECOMPCTNSA")
+```
+
+Once again, I will consider the RMSE and MAPE scores in order to asses each model's performance.
+
+```{r}
+fc %>% accuracy(ecomp_test)
+```
+
+From the results, I can see that:
+
+* the RMSE is 0.17 and the MAPE is 1.57 for the additive model
+
+* the RMSE is 0.27 and the MAPE is 1.71 for the ARIMA model
+
+* the RMSE is 0.21 and the MAPE is 1.60 for the average of the two models
+
+Thus, the additive model still has the lowest RMSE and MAPE, which means that it has the best performance and fits the ECOMPCTNSA series the best. 
+
+
+\newpage
+
+# Question 5 - Vector Autoregression
+
+**Conduct an EDA and develop a VAR model for the period 1946-2003. Forecast the last three years, 2004-2006, conducting residual diagnostics. Examine the relative advantages of logarithmic transformations and the use of differences.**
+
+Annual values for real mortgage credit (`RMC`), real consumer credit (`RCC`) and real disposable personal income (`RDPI`) for the period 1946-2006 are recorded in `Q5.csv`. All of the observations are measured in billions of dollars, after adjustment by the Consumer Price Index (CPI). 
+
+```{r}
+Q5 <- read_csv(paste0(here::here(),"/assignments/assignment_3/Q5.csv"))
+```
+
+```{r fig.align='center'}
+t1 <- head(Q5)
+t2 <- tail(Q5)
+grid.arrange(tableGrob(t1), tableGrob(t2), ncol = 2)
+```
+
+First, I need to convert the data into a suitable time series object.
+
+```{r}
+credit_ts <- as_tsibble(Q5, index = Year, regular = TRUE)
+```
+
+Then, I can begin my EDA. I will start this exploration by examining each series individually, starting with `RMC`.
+
+```{r fig.width=6.5, fig.height=4, fig.align='center', warning=FALSE}
+p1 <- credit_ts %>% ggplot(aes(x=Year,y=RMC)) + geom_line(colour="maroon",size=1) +
+  ggtitle('Annual RMC Values') + theme(legend.position = "none")
+p2 <- ggplot(credit_ts, aes(RMC)) + 
+  geom_histogram(binwidth = 500, fill = "mediumturquoise",col="white",size = 0.5)+
+  labs(title="Distribution of RMC", x = "RMC Values",y="Frequency")
+p3 <- ggAcf(credit_ts$RMC, lag.max = 104, main = "ACF of RMC")
+p4 <- ggPacf(credit_ts$RMC, lag.max = 104, main = "PACF of RMC")
+egg::ggarrange(p1, p2, p3, p4, nrow = 2)
+```
+
+From the plots, I can see that:
+
+* the time series has a strong upward trend, with no apparent seasonality. The series appears to grow almost exponentially as it increases more drastically in the more recent years.
+
+* the histogram shows that the values are unimodal but not necessarily normal. There is a positive right skew as there is a high frequency of lower values with a slight tail towards higher RMC scores.
+
+* the ACF declines very gradually and oscillates around the zero line.
+
+* the PACF has a sharp cut off after the first lag, then oscillates around the zero-line.
+
+Then, I can further examine the `RMC` series by decomposing it into its trend and random elements.
+
+```{r fig.width=6.2, fig.height=2.8, fig.align='center', warning=FALSE}
+credit_ts %>% model(STL(RMC)) %>% components() %>% autoplot()
+```
+
+The decomposition shows that there is a strong, almost exponential, upward trend. There is also some inconsistent random variation in the series.
+
+Then I can examine the `RCC`.
+
+```{r fig.width=6.5, fig.height=4, fig.align='center', warning=FALSE}
+p1 <- credit_ts %>% ggplot(aes(x=Year,y=RCC)) + geom_line(colour="maroon",size=1) +
+  ggtitle('Annual RCC Values') + theme(legend.position = "none")
+p2 <- ggplot(credit_ts, aes(RCC)) + 
+  geom_histogram(binwidth = 200, fill = "mediumturquoise",col="white",size = 0.5)+
+  labs(title="Distribution of RCC", x = "RCC Values",y="Frequency")
+p3 <- ggAcf(credit_ts$RCC, lag.max = 104, main = "ACF of RCC")
+p4 <- ggPacf(credit_ts$RCC, lag.max = 104, main = "PACF of RCC")
+egg::ggarrange(p1, p2, p3, p4, nrow = 2)
+```
+
+From the plots, I can see that:
+
+* the time series has a strong upward trend, with no apparent seasonality. The series appears to grow almost linearly, with some variations throughout the series.
+
+* the histogram shows that the values are mostly unimodal but not necessarily normal. There is a slight positive right skew as there is a higher frequency of lower values with a slight tail towards higher RCC scores.
+
+* the ACF declines very gradually and oscillates around the zero line.
+
+* the PACF has a sharp cut off after the first lag, then oscillates around the zero-line.
+
+Then, I can once again examine the `RCC` series by decomposing it into its trend and random elements.
+
+```{r fig.width=6.2, fig.height=2.8, fig.align='center', warning=FALSE}
+credit_ts %>% model(STL(RCC)) %>% components() %>% autoplot()
+```
+
+The decomposition shows that there is a strong, mostly linear, upward trend. There is also some inconsistent random variation in the series.
+
+Last, I can examine the `RDPI`.
+
+```{r fig.width=6.5, fig.height=4, fig.align='center', warning=FALSE}
+p1 <- credit_ts %>% ggplot(aes(x=Year,y=RDPI)) + geom_line(colour="maroon",size=1) +
+  ggtitle('Annual RCC Values') + theme(legend.position = "none")
+p2 <- ggplot(credit_ts, aes(RDPI)) + 
+  geom_histogram(binwidth = 500, fill = "mediumturquoise",col="white",size = 0.5)+
+  labs(title="Distribution of RDPI", x = "RDPI Values",y="Frequency")
+p3 <- ggAcf(credit_ts$RDPI, lag.max = 104, main = "ACF of RDPI")
+p4 <- ggPacf(credit_ts$RDPI, lag.max = 104, main = "PACF of RDPI")
+egg::ggarrange(p1, p2, p3, p4, nrow = 2)
+```
+
+From the plots, I can see that:
+
+* the time series has a strong upward trend, with no apparent seasonality. The series appears to grow almost linearly, with some slight variations throughout the series.
+
+* the histogram shows that the values are somewhat unimodal but definitely not normal. There is a slight positive right skew as there is a higher frequency of lower values with a prominent tail towards higher RDPI scores.
+
+* the ACF declines very gradually and oscillates around the zero line.
+
+* the PACF has a sharp cut off after the first lag, then oscillates around the zero-line.
+
+Then, I can further examine the `RDPI` series by decomposing it into its trend and random elements.
+
+```{r fig.width=6.2, fig.height=2.8, fig.align='center', warning=FALSE}
+credit_ts %>% model(STL(RDPI)) %>% components() %>% autoplot()
+```
+
+The decomposition shows that there is a strong, mostly linear, upward trend. There is also some inconsistent random variation in the series.
+
+I can then observe each of the series in relation with each other. First, I can get an overall idea of how each series compares by examining their collective time plot.
+
+```{r message=FALSE, fig.width=6.5, fig.height=3, fig.align='center'}
+credit_zoo <- credit_ts %>% zoo
+autoplot(credit_zoo[,c(2,3,4)], main = "", facet=NULL)
+```
+
+From the plot, I can see that `RDPI` has a consistently high linear growth. The `RMC` grows almost exponentially as it start low and rises to the level of the `RDPI` in the more recent years. The `RCC` has a consistently low linear growth, in relation to the other series.
+
+Next, I want to examine the correlation between the three series.
+
+```{r fig.width=6.2, fig.height=2.8, fig.align='center', warning=FALSE}
+corrplot::corrplot(cor(credit_ts[ ,c(2,3,4)]))
+```
+
+I can see from the correlation plot that each series is very correlated with one another.
+
+Then, I can also take a look at their scatter plot matrix, which is a representation of the extent of the contemporaneous correlation between the three series.
+
+```{r message=FALSE, fig.width=6.5, fig.height=3.6, fig.align='center'}
+cts <- ts(credit_ts[,c(2,3,4)], start=c(1994), end=c(2003), frequency=1)
+scatterplotMatrix(~cts[,1]+cts[,2]+cts[,3])
+```
+
+From the plots, I can see that each combination of the series has a positive correlation, with a strong upward trend. More specifically, `RMC` (represented by `cts[,1]`) is very positively correlated with `RCC` (represented by `cts[,2]`). There are slightly more deviations in correlation for both `RMC` and `RCC` with `RDPI` (represented by `cts[,3]`), but there is still a strong positive correlation present.   
+
+I can also consider each series' cross-correlation, which is achieved using the `ccf()` function. Cross correlation presents a technique for comparing two time series and finding objectively how they match up with each other, and in particular where the best match occurs. It can also reveal any periodicities in the data.
+
+```{r message=FALSE, fig.width=6.5, fig.height=3.2, fig.align='center'}
+par(mfrow=c(1,3))
+p1 <- ccf(cts[,1],cts[,2], main = "RMC & RCC")
+p2 <- ccf(cts[,2],cts[,3], main = "RCC & RDPI")
+p3 <- ccf(cts[,1],cts[,3], main = "RMC & RDPI")
+```
+
+Each CCF plot reveals that each combination of the series has significant cross-correlation. Although each plot is slightly different, they are very similar in terms of their cross-correlation representation. Overall, the cross-correlation plots show that there is meaningful cross-correlation after several lags. 
+
+I can then use the Augmented Dickey-Fuller Test to test if each series has a unit root.
+
+```{r, warning=FALSE}
+adf.test(credit_ts$RMC)
+adf.test(credit_ts$RCC)
+adf.test(credit_ts$RDPI)
+```
+
+The resulting p-value of each ADF test is approximately 0.9, which is greater than $\alpha = 0.05$. So, I can not reject the null hypothesis that each series does have a unit root. So, it is likely that each series has a unit root present. This is an indication that each series is actually not stationary and a transformation might be necessary for my model.
+
+Then, I can use the Phillips-Ouliaris Co-integration Test to test the null hypothesis that the series are not co-integrated. The correlation is used to check for the linear relationship (or linear interdependence) between two series while co-integration is used to check for the existence of a long-run relationship between two or more series.
+
+```{r}
+po.test(credit_ts)
+```
+
+The resulting p-value of the PO test is 0.15, which is greater than $\alpha = 0.05$. So, I can not reject the null hypothesis that the series are not co-integrated.
+
+Now that I have completed my EDA and have a good understanding of the time series data that I am working with, I can build my VAR model for the period 1946-2003. 
+
+Although there is prevalent correlation and non-stationarity in the data, I will start by building a basic VAR model with no transformations. Then, I will explore the relative advantages of logarithmic transformations and the use of differences. The purpose of these manipulations would be to help maintain model stationarity and improve the resulting forecasts.
+
+In order to build this basic VAR model, I will first split my data into a training (1946-2003) and test (2004-2006) set.
+
+```{r}
+credit_train <- Q5[which(Q5$Year <= 2003),c(2,3,4)]
+credit_test <- Q5[which(Q5$Year > 2003),c(2,3,4)]
+```
+
+I can use `VARselect` to to compare VAR models of different lags.
+
+```{r}
+VARselect(credit_train, lag.max = 10, type = "both")$selection
+```
+
+All the metrics produce different lags. The `AIC` and the `HQ` indicate that the lag $p = 10$ where the `FPE` produces $p = 9$. However, the `SC` indicates that the lag $p = 2$. In order to best generalize my model, I want to pick a lower lag value. As a result, I know that I need to build a VAR model of lag $p = 2$.
+
+```{r}
+var.fit <- VAR(credit_train, p = 2, type = "both")
+summary(var.fit)
+```
+
+Most of the auto-regressive coefficients are not significant in this model. There are a few significant terms, each at different lags for each series. The constant term and the trend term are generally not distinguishable from zero.
+
+To check if the VAR(2) with a constant and a trend is a stable process, I will need to check if the moduli of the eigenvalues of the companion matrix are all less than one.
+
+```{r}
+roots(var.fit)
+```
+
+There is an eigenvalue greater than 1. This is further indication that this is not necessarily a stationary model and a data transformation (such a a log or difference) will be necessary. 
+
+I can then assess the fit of the model by taking a closer look at the model residuals. As mentioned in `Part 1`, in order to produce good forecasts, the residuals must:
+
+* be uncorrelated. If there are correlations, than there is still information in them. So, they should not be used for forecasting.
+
+* have zero mean. If they do not, then the forecasts will be biased.
+
+* have constant variance.
+
+* be normally distributed.
+
+To start my residual diagnostics, I can first observe the residual time series.
+
+```{r fig.width=7.5, fig.height=3.2, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit %>% resid %>% .[, "RMC"] %>% plot(type = "l")
+var.fit %>% resid %>% .[, "RCC"] %>% plot(type = "l")
+var.fit %>% resid %>% .[, "RDPI"] %>% plot(type = "l")
+```
+
+From the plots I can see that each residual time series does not necessarily have constant variance. There are fluctuations of varying heights that are not consistent throughout the entire series. Yet, these fluctuations all appear to be centered around the zero-line. Therefore, the assumption of constant variance is violated and the assumption of zero conditional mean is maintained.
+
+I can also examine the normality of the residuals by looking at their histograms and Q-Q plots.
+
+```{r fig.width=6, fig.height=2.8, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit %>% resid %>% .[, "RMC"] %>% hist
+var.fit %>% resid %>% .[, "RCC"] %>% hist
+var.fit %>% resid %>% .[, "RDPI"] %>% hist
+```
+
+```{r fig.width=6, fig.height=2.8, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit %>% resid %>% .[, "RMC"] %>% qqPlot
+var.fit %>% resid %>% .[, "RCC"] %>% qqPlot
+var.fit %>% resid %>% .[, "RDPI"] %>% qqPlot
+```
+
+From the plots, I can see that, although there are some outlying points, the residuals are normally distributed for each series. Thus, the assumption of residual normality appears to be maintained.
+
+I can also statistically test for the normality of the model using the `normality.test()` function. This function computes a multivariate Jarque-Bera test and multivariate skewness and kurtosis tests for the residuals of a VAR model. The null hypothesis is that the residuals are normally distributed as well as the skewness being zero and the excess kurtosis being zero.
+
+```{r}
+var.fit.norm <- normality.test(var.fit, multivariate.only = TRUE)
+var.fit.norm
+```
+
+From each of the results, the p-values are all less than $\alpha = 0.05$. As a result, even though the histograms and Q-Q plots indicate normality, the residuals for the VAR model are not necessarily normally distributed.
+
+In order to assess the assumption of non-correlation, I can also consider the residual ACF and PACF.
+
+```{r fig.width=6, fig.height=4, fig.align='center', warning=FALSE}
+var.fit %>% resid %>% acf
+```
+
+From the residual ACF plots, I can see that each series gradually declines and oscillates around the zero line. There does not appear to be any major spikes, indicating that there is no serious correlation in the residuals.
+
+```{r fig.width=6, fig.height=4, fig.align='center', warning=FALSE}
+var.fit %>% resid %>% pacf
+```
+
+From the residual PACF plots, I can see that each series gradually declines and oscillates around the zero line. The `RCC` plots appear to have some spikes in subsequent lags. Otherwise, there does not appear to be many major spikes, indicating that there is generally no serious correlation in the residuals. So, overall, the assumption of non-correlation appears to be maintained.
+
+I can also statistically test for no serial correlation in the VAR model. This `serial.test()` function computes the multivariate Portmanteau test for serially correlated errors. The Portmanteau statistic tests the absence of serially correlated disturbances in a stable VAR. In the context of a serial test, $H_0$ is that there is no serial correlation of any order up to `lags.pt`, with rejection ($H_A$) indicating that the series does have serial correlation up to lag p.
+
+```{r warning=FALSE}
+var.fit.ptasy <- serial.test(var.fit, lags.pt = 10, type = "PT.asymptotic")
+var.fit.ptasy
+```
+
+The resulting p-value of the serial test is 0.049, which is slightly less than $\alpha = 0.05$. So, I can reject the null hypothesis that the series has no serial correlation of up to lag 10. This is an indication that my model actually has serial correlation in it.
+
+Then, I can test for the absence of ARCH effect. A time series exhibiting conditional heteroscedasticity—or autocorrelation in the squared series—is said to have autoregressive conditional heteroscedastic (ARCH) effects. The function `arch.test()` assesses the null hypothesis that a series of residuals exhibits no conditional heteroscedasticity (ARCH effects), against the alternative that an ARCH(L) model describes the series.
+
+```{r}
+var.fit.arch <- arch.test(var.fit)
+var.fit.arch
+```
+
+The resulting p-value of the ARCH test is 0.007, which is less than $\alpha = 0.05$. So, I can reject the null hypothesis that the series exhibits no conditional heteroscedasticity. This is an indication that my model has heteroscedasticity in it, which violates model assumptions.
+
+Then, I can forecast the last three years, which are 2004-2006, and plot the results.
+
+```{r}
+predictions <- var.fit %>% predict(n.ahead = 3, ci = 0.95)
+predictions
+```
+
+```{r fig.width=7, fig.height=5.4, fig.align='center', warning=FALSE}
+predictions %>% fanchart(colors = c("black","red"))
+```
+
+From the forecast charts, I can see that each of the series are projected to continue the general trend of the data. They all continue to increase at a similar rate as the prior data, with somewhat tight confidence intervals.
+
+I can also conduct residual diagnostics on my forecasts by comparing the actual values with the predicted values. 
+
+```{r}
+years <- c(2004,2005,2006)
+actual_rmc <- credit_test$RMC
+actual_rcc <- credit_test$RCC
+actual_rdpi <- credit_test$RDPI
+p_rmc <- predictions$fcst$RMC[,1]
+p_rcc <- predictions$fcst$RCC[,1]
+p_rdpi <- predictions$fcst$RDPI[,1]
+```
+
+```{r fig.width=6.5, fig.height=3.5, fig.align='center',warning=FALSE,message=FALSE}
+d1 <- data.frame(Year = years, Value = actual_rmc, Type = rep("Actual",3))
+d2 <- data.frame(Year = years, Value = p_rmc, Type = rep("Predicted",3))
+df_rmc <- rbind(d1,d2)
+p1 <- df_rmc %>% ggplot(aes(x=Year,y=Value)) + theme(legend.position="bottom") +
+  geom_line(size=1, aes(colour=Type)) + ggtitle('Forecast RMC Values')
+
+d1 <- data.frame(Year = years, Value = actual_rcc, Type = rep("Actual",3))
+d2 <- data.frame(Year = years, Value = p_rcc, Type = rep("Predicted",3))
+df_rcc <- rbind(d1,d2)
+p2 <- df_rcc %>% ggplot(aes(x=Year,y=Value)) + theme(legend.position="bottom") +
+  geom_line(size=1, aes(colour=Type)) + ggtitle('Forecast RCC Values')
+
+d1 <- data.frame(Year = years, Value = actual_rdpi, Type = rep("Actual",3))
+d2 <- data.frame(Year = years, Value = p_rdpi, Type = rep("Predicted",3))
+df_rdpi <- rbind(d1,d2)
+p3 <- df_rdpi %>% ggplot(aes(x=Year,y=Value)) + theme(legend.position="bottom") +
+  geom_line(size=1, aes(colour=Type)) + ggtitle('Forecast RDPI Values')
+
+egg::ggarrange(p1, p2, p3, nrow = 1)
+```
+
+From the plots, I can see that both the actual and predicted values increase and follow the general trend of the series. The predicted `RMC` and the `RDPI` are fairly close to the actual values, whereas the `RCC` is slightly less accurate. 
+
+Then, I can calculate the RMSE score of the predicted values. As mentioned previously, the RMSE represents the standard deviation of the residuals, as it refers to the square root of the average of the squared error terms.
+
+```{r}
+print(paste0("RMC RMSE: ",round(Metrics::rmse(actual_rmc, p_rmc),4)))
+print(paste0("RCC RMSE: ",round(Metrics::rmse(actual_rcc, p_rcc),4)))
+print(paste0("RDPI RMSE: ",round(Metrics::rmse(actual_rdpi, p_rdpi),4)))
+```
+
+In general, lower values of RMSE indicate better fit. So, I can see that the `RDPI` series has the lowest score and performs the best out of each of the series.
+
+Yet, it is possible to improve this model. As previously discovered in my EDA and residual diagnostics, I know that each series has a unit root and is not necessarily stationary. This is a good reason to explore the different advantages of logarithmic transformations and the applications of differences. These manipulations could help to improve the stationarity, which would improve the VAR model and its forecasts.
+
+Logarithmic transformations would be helpful to ensure stationarity in this context because there is a strong trend that is present in each series. Log transformation is useful when the size of the trend, seasonal, or random fluctuations seem to increase with the level of the time series. This type of transformation is especially useful where there is evidence of exponential growth, which was apparent in the `RMC` series. The extra variability can make trend and seasonal changes harder to forecast accurately. As a result, a transformation would required and log transforms are effective at removing variance. However, it is possible for null values to be produced, so they would need to be replaced with interpolated values. Nevertheless, a log transformation could be applied to the time series before building my model.
+
+Furthermore, logarithm transformations are useful because they are more easily interpretable in analysis. This is because the interpretation reflects that changes in a log value are relative to percentage changes on the original scale. 
+
+The use of differences would be beneficial in ensuring stationarity because first-differencing a time series will help to remove a linear trend. The first difference of a time series is the series of changes from one period to the next. Differencing can be used to remove the series dependence on time, so-called temporal dependence. This includes structures like trends and seasonality. This type of transformation is especially useful where there is evidence of linear growth, which was apparent in the `RCC` and the `RDPI` series. The non-stationarity can make trend and seasonal changes harder to forecast accurately. Thus, a difference transformation could be applied to the time series in order to improve the VAR model forecasts.
+
+Additionally, the first difference transformation would change the model interpretation to the change between subsequent time periods on the original scale.
+
+As there was apparent non-stationarity in the series, I can now build a VAR model for the first difference of the log transformed data in order to improve my model stationarity. The purpose of performing both transformations would be to remove the apparent trend and seasonality that is present in each time series.
+
+In order to build this first differenced and log transformed VAR model, I will first transform and split my data into a training (1946-2003) and test (2004-2006) set.
+
+```{r}
+credit_train_log <- data.frame(Year = credit_ts$Year,RMC = log(credit_ts$RMC),
+                              RCC = log(credit_ts$RCC),RDPI = log(credit_ts$RDPI))
+credit_train_log$RMC <- ifelse(is.nan(credit_train_log$RMC),NA,credit_train_log$RMC)
+credit_train_log$RMC <- na.approx(credit_train_log$RMC)
+credit_train_log$RCC <- ifelse(is.nan(credit_train_log$RCC),NA,credit_train_log$RCC)
+credit_train_log$RCC <- na.approx(credit_train_log$RCC)
+credit_train_log$RDPI<-ifelse(is.nan(credit_train_log$RDPI),NA,credit_train_log$RDPI)
+credit_train_log$RDPI[1] <- min(credit_train_log$RDPI, na.rm = T)
+credit_train_log$RDPI <- na.approx(credit_train_log$RDPI)
+```
+
+```{r}
+Q5_diff <- data.frame(Year=credit_train_log$Year[-1],RMC=diff(credit_train_log$RMC),
+                    RCC=diff(credit_train_log$RCC),RDPI=diff(credit_train_log$RDPI))
+credit_train_t <- Q5_diff[which(Q5_diff$Year <= 2003),c(2,3,4)]
+credit_test_t <- Q5_diff[which(Q5_diff$Year > 2003),c(2,3,4)]
+```
+
+I can then use `VARselect` to to compare VAR models of different lags.
+
+```{r}
+VARselect(credit_train_t, lag.max = 10, type = "both")$selection
+```
+
+All the metrics produce different lags. The `AIC` indicates that the lag $p = 10$ where the `HQ` and `FPE` produces $p = 2$. However, the `SC` indicates that the lag $p = 1$. In order to best generalize my model, I want to pick a lower, more general, lag value. As a result, I know that I need to build a VAR model of lag $p = 2$.
+
+As a result, I can build a transformed VAR model with lag 2.
+
+```{r}
+var.fit_t <- VAR(credit_train_t, p = 2, type = "both")
+summary(var.fit_t)
+```
+
+More of the auto-regressive coefficients are significant in this model. There are a some significant terms, each at different lags for each series. The constant term and the trend term are generally distinguishable from zero.
+
+To check if the VAR(2) with a constant and a trend is a stable process, I will need to check if the moduli of the eigenvalues of the companion matrix are all less than one.
+
+```{r}
+roots(var.fit_t)
+```
+
+There are no eigenvalues greater than 1. As a result, the first differenced and log transformed data is stationary and maintains important model assumptions.
+
+I can then assess the fit of the model by taking a closer look at the model residuals.
+
+```{r fig.width=7.5, fig.height=3.2, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit_t %>% resid %>% .[, "RMC"] %>% plot(type = "l")
+var.fit_t %>% resid %>% .[, "RCC"] %>% plot(type = "l")
+var.fit_t %>% resid %>% .[, "RDPI"] %>% plot(type = "l")
+```
+
+The residuals almost appear more like white noise. From the plots, I can see that each residual time series has mostly constant variance that is centered around the zero-line. Therefore, the assumptions of constant variance and zero conditional mean are maintained.
+
+I can also examine the normality of the residuals by looking at their histograms and Q-Q plots.
+
+```{r fig.width=6, fig.height=2.8, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit_t %>% resid %>% .[, "RMC"] %>% hist
+var.fit_t %>% resid %>% .[, "RCC"] %>% hist
+var.fit_t %>% resid %>% .[, "RDPI"] %>% hist
+```
+
+```{r fig.width=6, fig.height=2.8, fig.align='center', warning=FALSE}
+par(mfrow=c(1,3))
+var.fit_t %>% resid %>% .[, "RMC"] %>% qqPlot
+var.fit_t %>% resid %>% .[, "RCC"] %>% qqPlot
+var.fit_t %>% resid %>% .[, "RDPI"] %>% qqPlot
+```
+
+From the plots, I can see that, although there are some outlying points, the residuals are normally distributed for each series. Thus, the assumption of residual normality appears to be maintained.
+
+I can also statistically test for the normality of the model. Once again, the null hypothesis is that the residuals are normally distributed as well as the skewness being zero and the excess kurtosis being zero.
+
+```{r}
+var.fit.norm_t <- normality.test(var.fit_t, multivariate.only = TRUE)
+var.fit.norm_t
+```
+
+From each of the results, the p-values are all greater than $\alpha = 0.05$. As a result, the residuals for the transformed VAR model are normally distributed.
+
+In order to assess the assumption of non-correlation, I can also consider the residual ACF and PACF.
+
+```{r fig.width=6, fig.height=4, fig.align='center', warning=FALSE}
+var.fit_t %>% resid %>% acf
+```
+
+From the residual ACF plots, I can see that each series gradually declines and oscillates around the zero line. There does not appear to be any major spikes, indicating that there is no serious correlation in the residuals.
+
+```{r fig.width=6, fig.height=4, fig.align='center', warning=FALSE}
+var.fit_t %>% resid %>% pacf
+```
+
+From the residual PACF plots, I can see that each series gradually declines and oscillates around the zero line. The `RCC & RDPI` plot appears to have some spikes in subsequent lags. Otherwise, there does not appear to be many major spikes, indicating that there is generally no serious correlation in the residuals. So, overall, the assumption of non-correlation visually appears to be maintained.
+
+Then, I can statistically test for serial correlation in the model. In the context of an serial test, $H_0$ is that there is no serial correlation of any order up to `lags.pt`, with rejection ($H_A$) indicating that the series does have serial correlation up to lag p.
+
+```{r warning=FALSE}
+var.fit.ptasy_t <- serial.test(var.fit_t, lags.pt = 10, type = "PT.asymptotic")
+var.fit.ptasy_t
+```
+
+The resulting p-value of the serial test is 0.93, which is greater than $\alpha = 0.05$. So, I can not reject the null hypothesis that the series has no serial correlation of up to lag 10. This is an indication that my model now has no serial correlation in it.
+
+Then, I can test for the absence of ARCH effect. The null hypothesis is that a series of residuals exhibits no conditional heteroscedasticity (ARCH effects), against the alternative that an ARCH(L) model describes the series.
+
+```{r}
+var.fit.arch_t <- arch.test(var.fit_t)
+var.fit.arch_t
+```
+
+The resulting p-value of the ARCH test is 0.49, which is greater than $\alpha = 0.05$. So, I can not reject the null hypothesis that the series exhibits no conditional heteroscedasticity. This is an indication that my model has no heteroscedasticity in it, which satisfies model assumptions.
+
+Then, I can forecast and look at the transformed predictions for 2004-2006. The interpretation will now be in relation to the percent change from each subsequent time period.
+
+```{r}
+predictions_t <- var.fit_t %>% predict(n.ahead = 3, ci = 0.95)
+predictions_t
+```
+
+```{r fig.width=7, fig.height=5.4, fig.align='center', warning=FALSE}
+predictions_t %>% fanchart(colors = c("black","red"))
+```
+
+From the plots, I can see that the forecasts estimate that the percent change value from one year to the next will decrease for each series.
+
+As a result, there were advantages to performing logarithmic transformations and applying the use of differences. These data manipulations improved model assumptions of correlation and constant variance, which ultimately helped ensure model stationarity. Model stationarity thus satisfied the main forecasting assumptions, producing reliable predictions. Overall, I was able to conduct a thorough EDA, develop a basic and a transformed VAR model for the period 1946-2003, forecast the last three years (2004-2006), conduct residual diagnostics, and examine the relative advantages of logarithmic transformations and the use of differences for the multivariate data series.
+
+
+
+
+
+
+
+
+
+

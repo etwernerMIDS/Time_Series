@@ -1,8 +1,9 @@
-# Time Series
+# Statistical Methods for Discrete Response, Time Series, & Panel Data
 
 ## Erin Werner
 
-Data Analysis is the process of inspecting, cleansing, transforming and modeling data with the goal of discovering useful information, informing conclusions and supporting decision-making. Data analytics is used in business to help organizations make better business decisions. Data-driven businesses make decisions based on data, which means they can be more confident that their actions will bring success since there is data to support them.
+Statistics is a branch of applied mathematics dealing with data collection, organization, analysis, interpretation and presentation. A discrete response is a statistical distribution that shows the probabilities of discrete (countable) outcomes. Additionally, time series analysis is a statistical technique that deals with time series data, or trend analysis. Time series data means that data is in a series of particular time periods or intervals. Lastly, panel data is multi-dimensional data involving measurements of the same subject over time. Panel data can detect and measure statistical effects that pure time series or cross-sectional data can't. Each of these subjects require their own particular analysis and modeling techniques.
+
 
 The [projects](https://github.com/etwernerMIDS/Data_Analysis/tree/master/Projects) in this repository will cover the different aspects within the field of data analysis, such as 
 

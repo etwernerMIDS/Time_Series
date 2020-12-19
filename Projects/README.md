@@ -14,7 +14,7 @@ The main focus of Assignment 2 was implementing multinomial regression models on
 
 * [Assignment 3](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Assignment_3)
 
-The main focus of Assignment 3 was to apply different time series analysis techniques. These methods included linear modeling, ARIMA modeling, model averageing, cross-validation, and vector autoregression. Then, each model was able to generate predictive forcasts for the time series.
+The main focus of Assignment 3 was to apply different time series analysis techniques. These methods included linear modeling, ARIMA modeling, cross-validation, and vector autoregression. Then, each model was able to generate predictive forcasts for the time series.
 
 * [Lab 1](https://github.com/etwernerMIDS/Time_Series/tree/main/Projects/Lab_1)
 
